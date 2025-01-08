@@ -19,3 +19,4 @@ data/**/**/*.png
 
 results/
 logs/
+.vscode/launch.json

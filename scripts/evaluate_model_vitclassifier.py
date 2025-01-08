@@ -9,6 +9,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from datetime import datetime
 import sys
 import os
+from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier
 from src.data_processing import SpectrogramImageDataset
 from torch.optim import Adam, AdamW
 from torch.utils.data import DataLoader, Subset, ConcatDataset, WeightedRandomSampler
@@ -257,15 +258,18 @@ def kfold_cross_validation(model, test_loader, num_epochs, lr, group_by="", clas
         # Layer-Wise Learning Rate Decay (LRD)
         # Layers closer to the output layer receive a higher learning rate than those closer to the input.
         # This can help preserve the pre-trained representations.
-        optimizer = AdamW(
-            [
-                {"params": model.vit.vit.parameters(), "lr": lr * 0.1},  # Transformer encoder layers
-                {"params": model.vit.classifier.parameters(), "lr": lr}  # Classification head
-            ],
+        if isinstance(model, DeiTClassifier):
+            optimizer = AdamW(
+            model.deit.parameters(),  # Include all parameters once
             lr=lr,
             weight_decay=0.01
         )
-        
+        else:  # For ViTClassifier or other models
+            optimizer = AdamW(
+            model.vit.vit.parameters(),  # Include all parameters once
+            lr=lr,
+            weight_decay=0.01
+            )        
         # Define loss
         criterion = nn.CrossEntropyLoss()
 
@@ -400,7 +404,7 @@ def evaluate_full_model(model, test_loader):
             all_predictions.extend(predicted.cpu().numpy())
 
     report = classification_report(all_labels, all_predictions, zero_division=1)
-    print("\nFinal Test Evaluation Report:")
+    print("\nFinal Test Evaluation Report (eval using Test-Loader after last full KFold experiment):")
     print(report)
 
 def create_balanced_dataloader(dataset, batch_size):
@@ -424,7 +428,7 @@ def visualize_attention(dataset, model, idx, attentions, head=0, layer=-1):
     Visualize attention maps for a spectrogram from the dataset.
     Args:
         dataset (Dataset): The spectrogram dataset (SpectrogramImageDataset).
-        model (ViTClassifier): The trained Vision Transformer model.
+        model (ViTClassifier or DeiT): The trained Vision Transformer model.
         idx (int): Index of the spectrogram in the dataset.
         attentions: Attention outputs from the model.
         head (int): Attention head to visualize.
@@ -444,6 +448,11 @@ def visualize_attention(dataset, model, idx, attentions, head=0, layer=-1):
 
     # Forward pass through the model to get attentions
     logits, attentions = model(image_tensor)
+    
+    # Handle missing attentions
+    if attentions is None or layer >= len(attentions):
+        print(f"Attention output is None or invalid for layer {layer}.")
+        return
 
     # Extract the attention map for the specified layer and head
     attention_map = attentions[layer][0, head, :, :]  # Shape: [seq_len, seq_len]

@@ -1,9 +1,10 @@
 import torch
 import os
+from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, ConcatDataset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
-from src.models import CNN2D, ViTClassifier, ResNet18
+from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier
 from src.models.vitclassifier import train_and_save, load_trained_model
 from scripts.evaluate_model_vitclassifier import kfold_cross_validation, resubstitution_test, one_fold_with_bias, one_fold_without_bias, evaluate_full_model
 
@@ -63,10 +64,11 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
 
 def experimenter_vitclassifier_kfold():
 
-    model = ViTClassifier(num_classes=4).to("cuda") 
+    #model = ViTClassifier(num_classes=4).to("cuda")
+    model = DeiTClassifier(num_classes=4).to("cuda") 
     # Training parameters 
-    num_epochs_vit_train = 10
-    lr_vit_train = 0.0001
+    num_epochs_vit_train = 30
+    lr_vit_train = 0.00005
     batch_size = 32
     
     # Class-to-index mapping
@@ -92,14 +94,31 @@ def experimenter_vitclassifier_kfold():
     enforce_consistent_mapping(test_datasets, class_to_idx)
 
     # Combine datasets if necessary
-    train_concated_dataset = ConcatDataset(train_datasets)
+    pretrain_concated_dataset = ConcatDataset(train_datasets)
     test_concated_dataset = ConcatDataset(test_datasets)
+ 
+    train_idx, eval_idx = train_test_split(
+        range(len(pretrain_concated_dataset)), 
+        test_size=0.2, 
+        stratify=[y for _, y in pretrain_concated_dataset]
+    )
+
+    # Define loaders
+    pretrain_train_loader = DataLoader(
+        torch.utils.data.Subset(pretrain_concated_dataset, train_idx), 
+        batch_size=batch_size, shuffle=True, num_workers=4
+    )
+
+    pretrain_eval_loader = DataLoader(
+        torch.utils.data.Subset(pretrain_concated_dataset, eval_idx), 
+        batch_size=batch_size, shuffle=False, num_workers=4
+    )
     
-    train_loader = DataLoader(train_concated_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    pretrain_loader = DataLoader(pretrain_concated_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     test_loader = DataLoader(test_concated_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     
     # Compute and print distributions using dataset names
-    for dataset_name, dataset_loader in zip(train_datasets_name, [train_loader]):
+    for dataset_name, dataset_loader in zip(train_datasets_name, [pretrain_loader]):
         print(f"\n>> Calculating distribution for pre-train dataset ({dataset_name})...")
         train_distribution = compute_and_print_distribution(dataset_loader, class_to_idx, dataset_name)
 
@@ -111,15 +130,10 @@ def experimenter_vitclassifier_kfold():
     saved_model_path = "saved_models/vit_classifier.pth"
 
     # Experiment log
-    title = "Transfer Learning: Addressing cross Datasets with ViTClasifier"
+    #title = "Transfer Learning: Addressing cross Datasets with ViTClasifier"
+    title = "Transfer Learning: Addressing cross Datasets with DeiTClasifier"
     print_info("Experiment", [title])
     print(f"Saved model path: {saved_model_path}")
-    
-    # if os.path.exists(saved_model_path):
-    #     print(f"Loading model from {saved_model_path}...")
-    #     model.load_state_dict(torch.load(saved_model_path, weights_only=True, map_location="cuda"))
-    # else:
-    #     print("Pre-training required. No saved model found.")
         
     # Print the class-to-index mapping with dataset names
     for dataset_name, dataset in zip(train_datasets_name, train_datasets):
@@ -128,21 +142,24 @@ def experimenter_vitclassifier_kfold():
     for dataset_name, dataset in zip(test_datasets_name, test_datasets):
         print(f"Test dataset ({dataset_name}) mapping: {dataset.class_to_idx}")
     
-    # Instantiate the ViTClassifier and train it with train_loader to narrow the model context
+    # Instantiate the ViTClassifier or DeiTClassifier and train it with train_loader to narrow the model context
     pretrain_model = True
     if pretrain_model: 
-        model = ViTClassifier().to("cuda")
+        model = DeiTClassifier().to("cuda")
+        #model = ViTClassifier().to("cuda")
         print("Pre-training according request.")
-        train_and_save(model, train_loader, num_epochs_vit_train, lr_vit_train, saved_model_path)
+        train_and_save(model, pretrain_train_loader, pretrain_eval_loader, num_epochs_vit_train, lr_vit_train, saved_model_path)
+        
     else:
          print("No Pre-training is needed, using a saved file.")
 
     # Load the trained model for testing/evaluation
-    model = load_trained_model(ViTClassifier, saved_model_path, num_classes=len(class_to_idx)).to("cuda")
+    model = load_trained_model(DeiTClassifier, saved_model_path, num_classes=len(class_to_idx)).to("cuda")
+    #model = load_trained_model(ViTClassifier, saved_model_path, num_classes=len(class_to_idx)).to("cuda")
     
     # Running the experiment 
     num_epochs = 10
-    lr = 0.001
+    lr = 0.00005
     #group_by = "rpm" 
     #group_by = "extent_damage"
     #group_by = "condition_bearing_health"
