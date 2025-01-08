@@ -4,7 +4,7 @@ from scripts.copy_spectrogram_to_folds import copy_spectrogram_to_folds
 from src.data_processing.dataset_manager import DatasetManager
 from utils import load_yaml
 from utils.dual_output import DualOutput  # Import the class from dual_output.py
-from experimenter_vitclassifier_kfold import experimenter_visual_classifier_kfold
+from experimenter_vitclassifier_kfold import experimenter_vitclassifier_kfold
 from run_pretrain import experimenter
 import sys
 from datetime import datetime
@@ -52,7 +52,7 @@ def create_spectrograms():
 # EXPERIMENTERS
 def run_experimenter():
     #model = ResNet18() 
-    experimenter_visual_classifier_kfold() #pre train and test
+    experimenter_vitclassifier_kfold() #pre train and test
 
 
 if __name__ == '__main__':

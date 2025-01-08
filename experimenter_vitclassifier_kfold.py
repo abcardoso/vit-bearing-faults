@@ -62,7 +62,7 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
             dataset.classes = list(desired_class_to_idx.keys())
     print("[info] Mappings enforced successfully.")
 
-def experimenter_visual_classifier_kfold():
+def experimenter_vitclassifier_kfold():
     
     # Toggle between use the pre-trained saved model or pre-train it
     pretrain_model = True
