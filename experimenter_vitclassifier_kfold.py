@@ -62,10 +62,17 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
             dataset.classes = list(desired_class_to_idx.keys())
     print("[info] Mappings enforced successfully.")
 
-def experimenter_vitclassifier_kfold():
+def experimenter_visual_classifier_kfold():
+    
+    # Toggle between use the pre-trained saved model or pre-train it
+    pretrain_model = True
+    
+    # Toggle between ViT and DeiT
+    use_vit = False  # Set to True for ViT, False for DeiT
 
-    #model = ViTClassifier(num_classes=4).to("cuda")
-    model = DeiTClassifier(num_classes=4).to("cuda") 
+    model_class = ViTClassifier if use_vit else DeiTClassifier
+    model = model_class(num_classes=4).to("cuda")
+    
     # Training parameters 
     num_epochs_vit_train = 30
     lr_vit_train = 0.00005
@@ -126,12 +133,9 @@ def experimenter_vitclassifier_kfold():
         print(f"\n>> Calculating distribution for test dataset ({dataset_name})...")
         test_distribution = compute_and_print_distribution(dataset_loader, class_to_idx, dataset_name)
     
-    # Loads the pre-trained model
-    saved_model_path = "saved_models/vit_classifier.pth"
-
-    # Experiment log
-    #title = "Transfer Learning: Addressing cross Datasets with ViTClasifier"
-    title = "Transfer Learning: Addressing cross Datasets with DeiTClasifier"
+    # Save path and experiment log
+    saved_model_path = "saved_models/vit_classifier.pth" if use_vit else "saved_models/deit_classifier.pth"
+    title = f"Transfer Learning: Addressing cross Datasets with {'ViT' if use_vit else 'DeiT'}Classifier"
     print_info("Experiment", [title])
     print(f"Saved model path: {saved_model_path}")
         
@@ -143,19 +147,15 @@ def experimenter_vitclassifier_kfold():
         print(f"Test dataset ({dataset_name}) mapping: {dataset.class_to_idx}")
     
     # Instantiate the ViTClassifier or DeiTClassifier and train it with train_loader to narrow the model context
-    pretrain_model = True
     if pretrain_model: 
-        model = DeiTClassifier().to("cuda")
-        #model = ViTClassifier().to("cuda")
+        model = model_class().to("cuda")
         print("Pre-training according request.")
         train_and_save(model, pretrain_train_loader, pretrain_eval_loader, num_epochs_vit_train, lr_vit_train, saved_model_path)
-        
     else:
-         print("No Pre-training is needed, using a saved file.")
+        print("No Pre-training is needed, using a saved file.")
 
     # Load the trained model for testing/evaluation
-    model = load_trained_model(DeiTClassifier, saved_model_path, num_classes=len(class_to_idx)).to("cuda")
-    #model = load_trained_model(ViTClassifier, saved_model_path, num_classes=len(class_to_idx)).to("cuda")
+    model = load_trained_model(model_class, saved_model_path, num_classes=len(class_to_idx)).to("cuda")
     
     # Running the experiment 
     num_epochs = 10
