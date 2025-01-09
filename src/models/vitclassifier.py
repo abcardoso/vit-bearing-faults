@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import ViTForImageClassification, ViTConfig, ViTImageProcessor, DeiTForImageClassification, DeiTImageProcessor
+from transformers import ViTForImageClassification, ViTConfig, ViTImageProcessor, DeiTForImageClassification, DeiTImageProcessor, AutoFeatureExtractor
 from torchvision.transforms import ToPILImage
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 
@@ -49,9 +49,11 @@ class DeiTClassifier(nn.Module):
         super(DeiTClassifier, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Correct initialization for DeiT model
-        self.processor = DeiTImageProcessor.from_pretrained("facebook/deit-base-patch16-224")
-        self.processor.do_rescale = False
+        # # Correct initialization for DeiT model
+        # self.processor = DeiTImageProcessor.from_pretrained("facebook/deit-base-patch16-224")
+        # self.processor.do_rescale = False
+        # Feature extractor
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/deit-base-patch16-224")
 
         # Ensure only the correct model is loaded
         self.deit = ViTForImageClassification.from_pretrained(
@@ -71,13 +73,13 @@ class DeiTClassifier(nn.Module):
     def forward(self, x):
         to_pil = ToPILImage()
         images = [to_pil(img) for img in x]
-        inputs = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
+        inputs = self.feature_extractor(images=images, return_tensors="pt").pixel_values.to(self.device)
 
         output = self.deit(pixel_values=inputs)
         return output.logits, output.attentions
     
 # To train and save the model after training
-def train_and_save(model, train_loader, eval_loader, num_epochs, lr=0.001, save_path="vit_classifier.pth", patience=3, weight_decay=0.01):
+def train_and_save(model, train_loader, eval_loader, num_epochs, lr=0.001, save_path="deit_classifier.pth", patience=3, weight_decay=0.01):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 

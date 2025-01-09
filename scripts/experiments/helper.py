@@ -57,72 +57,70 @@ def grouper_distribution(dataset, feature_mitigation, indices, class_names):
     print(f'Computed Class Distribution by {feature_mitigation}:', class_distribution)
     return class_distribution
 
-def get_class_counter(dataset, feature_label="label"):
+def get_class_counter(dataset, feature_label="label", verbose=True):
     """
     Counts the number of samples per class in the dataset.
     Supports both standard datasets and ConcatDataset.
     """
-    class_counter = {"N": 0, "B": 0, "O": 0, "I": 0}
+    class_counter = {}
 
     # Handle both standard datasets and ConcatDataset
-    if isinstance(dataset, ConcatDataset):
-        # Combine samples from all constituent datasets
-        samples = []
-        for sub_dataset in dataset.datasets:
-            samples.extend(sub_dataset.samples)
-    else:
-        samples = dataset.samples
+    samples = (
+        [sample for sub_dataset in dataset.datasets for sample in sub_dataset.samples]
+        if isinstance(dataset, ConcatDataset)
+        else dataset.samples
+    )
 
     # Iterate through samples and count class occurrences
-    for i in range(len(samples)):
-        basename = os.path.basename(samples[i][0]).split('#')[0]
-        bearing_info = annot.filter_data({"filename": basename})[0]
+    for sample in samples:
+        basename = os.path.basename(sample[0]).split('#')[0]
+        try:
+            bearing_info = annot.filter_data({"filename": basename})[0]
+        except Exception as e:
+            print(f"Error processing {basename}: {e}")
+            continue
+
         class_label = bearing_info.get(feature_label, "default")
+        class_counter[class_label] = class_counter.get(class_label, 0) + 1
 
-        if class_label in class_counter:
-            class_counter[class_label] += 1
-        else:
-            # Handle unexpected labels if necessary
-            class_counter[class_label] = 1
-
-    # Print the total samples per class
-    print("Total samples per class:")
-    for class_key, count in class_counter.items():
-        print(f"  - {class_key}: {count}")
+    # Print the total samples per class if verbose
+    if verbose:
+        counter_str = " | ".join([f"{class_key}: {count}" for class_key, count in class_counter.items()])
+        print(f"Total samples per class ({feature_label}) | {counter_str}")
 
     return class_counter
 
 
-def get_counter(dataset, feature_mitigation):
+def get_counter(dataset, feature_mitigation, default_value="default", verbose=True):
     """
     Calculates occurrences of a specific feature in the dataset.
     Handles both simple datasets and ConcatDataset.
     """
     counter = {}
 
-    # Check if the dataset is a ConcatDataset
-    if isinstance(dataset, ConcatDataset):
-        # Combine samples from all constituent datasets
-        samples = []
-        for sub_dataset in dataset.datasets:
-            samples.extend(sub_dataset.samples)
-    else:
-        samples = dataset.samples
+    # Handle both standard datasets and ConcatDataset
+    samples = (
+        [sample for sub_dataset in dataset.datasets for sample in sub_dataset.samples]
+        if isinstance(dataset, ConcatDataset)
+        else dataset.samples
+    )
 
     # Iterate through samples and count feature occurrences
-    for i in range(len(samples)):
-        basename = os.path.basename(samples[i][0]).split('#')[0]
-        bearing_info = annot.filter_data({"filename": basename})[0]
-        feature_value = bearing_info.get(feature_mitigation, "default")
+    for sample in samples:
+        basename = os.path.basename(sample[0]).split('#')[0]
+        try:
+            bearing_info = annot.filter_data({"filename": basename})[0]
+        except Exception as e:
+            print(f"Error processing {basename}: {e}")
+            continue
 
-        if feature_value not in counter:
-            counter[feature_value] = 0
-        counter[feature_value] += 1
+        feature_value = bearing_info.get(feature_mitigation, default_value)
+        counter[feature_value] = counter.get(feature_value, 0) + 1
 
-    # Print the class-wise counter
-    print(f"Counter per class for feature '{feature_mitigation}':")
-    for feature, count in counter.items():
-        print(f"  - {feature}: {count}")
+    # Print the feature-wise counter if verbose
+    if verbose:
+        counter_str = " | ".join([f"{feature}: {count}" for feature, count in counter.items()])
+        print(f"Feature-wise counter for '{feature_mitigation}' | {counter_str}")
 
     return counter
 
@@ -184,5 +182,51 @@ def grouper(dataset, feature_mitigation):
     print('Group Class Distribution:')
     for group, distribution in group_class_distribution.items():
         print(f"  Group {group}: {distribution}")
+
+    return groups
+
+def grouperf(dataset, feature_mitigation): 
+    """
+    Groups the dataset based on a specific feature for mitigation purposes.
+    Supports both standard datasets and ConcatDataset.
+    """
+    if not feature_mitigation:
+        print("Group by: none")
+        return [0] * len(dataset)
+
+    # Extract samples
+    samples = []
+    if isinstance(dataset, ConcatDataset):
+        for sub_dataset in dataset.datasets:
+            samples.extend(sub_dataset.samples)
+    else:
+        samples = dataset.samples
+
+    # Metadata initialization
+    groups = []
+    counter = get_counter(dataset, feature_mitigation)
+    class_counter = get_class_counter(dataset, "label")
+    num_groups = len(counter)
+
+    # Group class distribution initialization
+    group_class_distribution = {g: {label: 0 for label in class_counter} for g in range(num_groups)}
+
+    # Assign samples to groups
+    for i, sample in enumerate(samples):
+        path = sample[0]
+        basename = os.path.basename(path).split('#')[0]
+        bearing_info = annot.filter_data({"filename": basename})[0]
+        class_label = bearing_info.get("label", "default")
+
+        # Assign sample to a group with the least filled slot for the class
+        least_filled_group = min(group_class_distribution, key=lambda g: group_class_distribution[g][class_label])
+        group_class_distribution[least_filled_group][class_label] += 1
+        groups.append(least_filled_group)
+
+    # Print detailed group information
+    print(f"Group by: {feature_mitigation} | Groups: {set(groups)} | Counter: {counter} | ClassCounter: {class_counter}")
+    for group, distribution in group_class_distribution.items():
+        dist_str = " | ".join([f"{label}: {count}" for label, count in distribution.items()])
+        print(f"  Group {group} | {dist_str}")
 
     return groups

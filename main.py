@@ -52,7 +52,11 @@ def create_spectrograms():
 # EXPERIMENTERS
 def run_experimenter():
     #model = ResNet18() 
-    experimenter_vitclassifier_kfold() #pre train and test
+    use_vit = False #ViT or DeiT
+    pretrain_model=False # pretrain or use saved 
+    base_model=True # base model with no pre-train strategy
+    
+    experimenter_vitclassifier_kfold(use_vit, pretrain_model, base_model) #pre train and test
 
 
 if __name__ == '__main__':

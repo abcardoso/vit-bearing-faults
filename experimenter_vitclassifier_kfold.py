@@ -1,5 +1,6 @@
 import torch
 import os
+import copy
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, ConcatDataset
 from torchvision import transforms
@@ -29,9 +30,9 @@ def compute_and_print_distribution(loader, class_to_idx, dataset_name):
 
     distribution = {idx_to_class[idx]: all_labels.count(idx) for idx in class_to_idx.values()}
 
-    print(f"\nClass Distribution for {dataset_name}:")
-    for class_name, count in distribution.items():
-        print(f"| {class_name}: {count}")
+    # Generate single-line print
+    dist_str = " | ".join([f"{class_name}: {count}" for class_name, count in distribution.items()])
+    print(f"Class Distribution for {dataset_name} | {dist_str}")
 
     return distribution
 
@@ -62,19 +63,19 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
             dataset.classes = list(desired_class_to_idx.keys())
     print("[info] Mappings enforced successfully.")
 
-def experimenter_vitclassifier_kfold():
+def experimenter_vitclassifier_kfold(use_vit=True, pretrain_model=False, base_model=True):
     
     # Toggle between use the pre-trained saved model or pre-train it
-    pretrain_model = True
+    # pretrain_model = True
     
     # Toggle between ViT and DeiT
-    use_vit = False  # Set to True for ViT, False for DeiT
+    # use_vit = False  # Set to True for ViT, False for DeiT
 
     model_class = ViTClassifier if use_vit else DeiTClassifier
     model = model_class(num_classes=4).to("cuda")
     
     # Training parameters 
-    num_epochs_vit_train = 30
+    num_epochs_vit_train = 10
     lr_vit_train = 0.00005
     batch_size = 32
     
@@ -137,7 +138,8 @@ def experimenter_vitclassifier_kfold():
     saved_model_path = "saved_models/vit_classifier.pth" if use_vit else "saved_models/deit_classifier.pth"
     title = f"Transfer Learning: Addressing cross Datasets with {'ViT' if use_vit else 'DeiT'}Classifier"
     print_info("Experiment", [title])
-    print(f"Saved model path: {saved_model_path}")
+    if not base_model:
+        print(f"Saved model path: {saved_model_path}")
         
     # Print the class-to-index mapping with dataset names
     for dataset_name, dataset in zip(train_datasets_name, train_datasets):
@@ -147,15 +149,19 @@ def experimenter_vitclassifier_kfold():
         print(f"Test dataset ({dataset_name}) mapping: {dataset.class_to_idx}")
     
     # Instantiate the ViTClassifier or DeiTClassifier and train it with train_loader to narrow the model context
-    if pretrain_model: 
-        model = model_class().to("cuda")
-        print("Pre-training according request.")
-        train_and_save(model, pretrain_train_loader, pretrain_eval_loader, num_epochs_vit_train, lr_vit_train, saved_model_path)
+    if not base_model:
+        if pretrain_model: 
+            model = model_class().to("cuda")
+            print("Pre-training according request.")
+            train_and_save(model, pretrain_train_loader, pretrain_eval_loader, num_epochs_vit_train, lr_vit_train, saved_model_path)
+        else:
+            print("No Pre-training started, using a pre-train saved file.")
+            # Load the trained model for testing/evaluation
+            model = load_trained_model(model_class, saved_model_path, num_classes=len(class_to_idx)).to("cuda")
     else:
-        print("No Pre-training is needed, using a saved file.")
-
-    # Load the trained model for testing/evaluation
-    model = load_trained_model(model_class, saved_model_path, num_classes=len(class_to_idx)).to("cuda")
+        initial_state = copy.deepcopy(model.state_dict())
+        model.load_state_dict(copy.deepcopy(initial_state))
+        print(f"Using raw base model {'ViT' if use_vit else 'DeiT'}Classifier with no pre-train.")
     
     # Running the experiment 
     num_epochs = 10

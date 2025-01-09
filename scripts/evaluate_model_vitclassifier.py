@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader, Subset, ConcatDataset, WeightedRandomSa
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score, f1_score, classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedShuffleSplit, StratifiedGroupKFold, StratifiedKFold
-from scripts.experiments.helper import grouper, grouper_distribution 
+from scripts.experiments.helper import grouperf, grouper_distribution 
 
 def print_confusion_matrix(cm, class_names, all_labels, all_predictions):
     """Displays the confusion matrix in the console."""
@@ -196,7 +196,7 @@ def kfold_cross_validation(model, test_loader, num_epochs, lr, group_by="", clas
 
     # If `group_by` is empty, use regular StratifiedKFold, otherwise use StratifiedGroupKFold
     if group_by:
-        groups = grouper(dataset, group_by)
+        groups = grouperf(dataset, group_by)
         skf = StratifiedGroupKFold(n_splits=n_splits)
         split = skf.split(X, y, groups)
     else:
@@ -249,9 +249,17 @@ def kfold_cross_validation(model, test_loader, num_epochs, lr, group_by="", clas
         print(f"Fold {fold + 1} - [debug] Test Distribution from Loader: {test_distribution_from_loader}")
 
         # Reset model to initial state and move to GPU
-        #debug print("Initial weight sample before reset:",  model.vit.classifier.weight[0][:5])  # Example layer and slice
+        #debug 
+        # if isinstance(model, DeiTClassifier):
+        #     print("[debug - DeiT] Initial weight sample before reset:",  model.deit.classifier[1].weight[0][:5])  # Example layer and slice
+        # else: 
+        #     print("[debug - ViT] Initial weight sample before reset:",  model.vit.classifier.weight[0][:5])
         model.load_state_dict(copy.deepcopy(initial_state))
-        #debug print("Initial weight sample after reset:",  model.vit.classifier.weight[0][:5])
+        # #debug 
+        # if isinstance(model, DeiTClassifier):
+        #     print("[debug - DeiT] Initial weight sample after reset:",  model.deit.classifier[1].weight[0][:5])  # Example layer and slice
+        # else: 
+        #     print("[debug - ViT] Initial weight sample after reset:",  model.vit.classifier.weight[0][:5])
         
         # Reinitialize the optimizer for each fold
   
