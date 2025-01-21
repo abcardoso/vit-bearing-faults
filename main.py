@@ -4,7 +4,7 @@ from scripts.copy_spectrogram_to_folds import copy_spectrogram_to_folds
 from src.data_processing.dataset_manager import DatasetManager
 from utils import load_yaml
 from utils.dual_output import DualOutput  # Import the class from dual_output.py
-from experimenter_vitclassifier_kfold import experimenter_vitclassifier_kfold
+from experimenter_vitclassifier_kfold import experimenter_classifier_kfold
 from run_pretrain import experimenter
 import sys
 from datetime import datetime
@@ -52,11 +52,24 @@ def create_spectrograms():
 # EXPERIMENTERS
 def run_experimenter():
     #model = ResNet18() 
-    use_vit = False #ViT or DeiT
-    pretrain_model=False # pretrain or use saved 
-    base_model=True # base model with no pre-train strategy
+    model_type="ViT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2"
+    pretrain_model=True # pretrain or use saved 
+    base_model=False # base model with no pre-train strategy nor use of weights saved
     
-    experimenter_vitclassifier_kfold(use_vit, pretrain_model, base_model) #pre train and test
+    experimenter_classifier_kfold(
+        model_type=model_type,
+        pretrain_model=pretrain_model,
+        base_model=base_model,
+        num_classes=4,
+        num_epochs=20,
+        lr=0.00005,
+        num_epochs_kf=10,
+        lr_kf=0.00005,
+        batch_size=32,
+        root_dir="data/spectrograms",
+        train_datasets_name=["CWRU"],
+        test_datasets_name=["UORED"]
+    )
 
 
 if __name__ == '__main__':

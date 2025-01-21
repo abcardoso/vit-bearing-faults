@@ -2,6 +2,7 @@ import numpy as np
 import copy
 import torch
 import cv2
+import seaborn as sns
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
@@ -9,7 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from datetime import datetime
 import sys
 import os
-from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier
+from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier
 from src.data_processing import SpectrogramImageDataset
 from torch.optim import Adam, AdamW
 from torch.utils.data import DataLoader, Subset, ConcatDataset, WeightedRandomSampler
@@ -18,18 +19,44 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedShuffleSplit, StratifiedGroupKFold, StratifiedKFold
 from scripts.experiments.helper import grouperf, grouper_distribution 
 
-def print_confusion_matrix(cm, class_names, all_labels, all_predictions):
-    """Displays the confusion matrix in the console."""
-    # Ensure alignment between labels and predictions
-    cm = confusion_matrix(
-        all_labels,
-        all_predictions,
-        labels=np.arange(len(class_names))  # Explicitly use all expected class labels
-    )
-    print("Confusion Matrix:")
-    print("     " + "    ".join(class_names))
-    for i, row in enumerate(cm):
-        print(f"{class_names[i]:<4}" + "  ".join(f"{val:4}" for val in row))
+def print_confusion_matrix(confusion_matrix, class_names, output_dir, experiment_name, all_labels=None, all_predictions=None):
+        # Ensure the logs folder exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate the heatmap
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(confusion_matrix, annot=True, fmt="d", cmap="Blues",
+                xticklabels=class_names, yticklabels=class_names)
+    plt.xlabel("Predicted Labels")
+    plt.ylabel("True Labels")
+    plt.title("Confusion Matrix")
+
+    # Save the figure with a timestamped filename
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    file_name = f"{output_dir}/{experiment_name}_confusion_matrix_{timestamp}.png"
+    plt.savefig(file_name, bbox_inches="tight", dpi=300)
+
+    print(f"\nConfusion Matrix - {experiment_name}:")
+    header = "     " + "   ".join(f"{name:>4}" for name in class_names)
+    print(header)
+    for label, row in zip(class_names, confusion_matrix):
+        row_data = "   ".join(f"{val:>4}" for val in row)
+        print(f"{label:>4} {row_data}")
+
+    # Print the path where the heatmap was saved
+    print(f"Confusion matrix heatmap saved to: {file_name}")
+
+    # Optionally print detailed label comparisons
+    # if all_labels is not None and all_predictions is not None:
+    #     print("\nDetailed Label Comparisons:")
+    #     print(f"{'Index':<8}{'True Label':<12}{'Predicted Label':<15}")
+    #     for idx, (true, pred) in enumerate(zip(all_labels, all_predictions)):
+    #         true_label = class_names[true]
+    #         pred_label = class_names[pred]
+    #         print(f"{idx:<8}{true_label:<12}{pred_label:<15}")
+
+    # Show the heatmap
+    plt.show()
     
 def resubstitution_test(model, dataset, num_epochs, lr, class_names):
     # Set up data loader
@@ -184,223 +211,209 @@ def one_fold_without_bias(model, dataset, num_epochs, lr, class_names):
     #print(dataset.get_dataset_name())
     print_confusion_matrix(cm, class_names, all_labels, all_predictions)
     
-def kfold_cross_validation(model, test_loader, num_epochs, lr, group_by="", class_names=[], n_splits=4):
-    """Performs K-Fold Cross-Validation for ViT models with optional grouping on the provided dataset."""
-    batch_size = 32
-    dataset = test_loader.dataset
+def kfold_cross_validation(
+    model,
+    model_type,
+    test_loader,
+    num_epochs,
+    lr,
+    group_by="",
+    class_names=[],
+    n_splits=4,
+    perform_kfold=True,  # New parameter to toggle K-Fold Cross-Validation
+    debug=False
+):
+    """
+    Performs K-Fold Cross-Validation or direct evaluation for models.
     
-    # Extract targets directly from the DataLoader
-    y = [label for _, label in dataset]
+    Args:
+        model (nn.Module): Model to be validated.
+        test_loader (DataLoader): DataLoader for the test dataset.
+        num_epochs (int): Number of epochs for training in each fold.
+        lr (float): Learning rate.
+        group_by (str): Grouping criterion (optional).
+        class_names (list): List of class names.
+        n_splits (int): Number of folds for cross-validation.
+        perform_kfold (bool): Whether to perform K-Fold Cross-Validation.
+        debug (bool): If True, print debug information.
+    """
+    batch_size = test_loader.batch_size
+    dataset = test_loader.dataset
 
-    X = np.arange(len(y))
+    if not perform_kfold:
+        # Direct evaluation mode
+        print("Performing direct evaluation...")
+        evaluate_model(model, test_loader, class_names, debug=debug)
+        return
 
-    # If `group_by` is empty, use regular StratifiedKFold, otherwise use StratifiedGroupKFold
+    # K-Fold Cross-Validation mode
+    y = [label for _, label in dataset]  # Extract labels
+    X = np.arange(len(y))  # Indices as features
+
+    # Determine cross-validation strategy
     if group_by:
         groups = grouperf(dataset, group_by)
         skf = StratifiedGroupKFold(n_splits=n_splits)
         split = skf.split(X, y, groups)
     else:
-        print('Group by: none')
+        if debug:
+            print("Group by: None")
         skf = StratifiedKFold(n_splits=n_splits)
         split = skf.split(X, y)
 
-    # Save initial model state for reinitialization before each fold
+    # Save initial model state
     initial_state = copy.deepcopy(model.state_dict())
-    fold_metrics = []  # Store metrics for all folds
+    fold_metrics = []
 
-    print('LR: ', lr)
-    print('Starting K-Fold Cross-Validation Loop...')   
-    # K-Fold Cross-Validation Loop
+    print(f"Learning Rate: {lr}")
+    #print(f"Starting K-Fold Cross-Validation... Model: {model_type.lower()}")
+    print(f"Starting K-Fold Cross-Validation...")
+    
+    # Initialize class_sample_indices before K-Fold
+    class_sample_indices = None
+
     for fold, (train_idx, test_idx) in enumerate(split):
-        print(f"\nStarting Fold {fold + 1}")
+        print(f"\nFold {fold + 1}/{n_splits}")
 
-        # Skip this fold if the test split is empty
-        if len(test_idx) == 0 or len(train_idx) == 0:
-            print(f"Skipping Fold {fold + 1} as the test set is empty.")
+        if len(train_idx) == 0 or len(test_idx) == 0:
+            print(f"Skipping Fold {fold + 1}: Empty train or test set.")
             continue
 
-        # print(f">> Train distribution: -- using grouper logic")    
-        # train_distribution = grouper_distribution(dataset, group_by, train_idx, class_names)
-        # print(f">> Test distribution: -- using grouper logic") 
-        # test_distribution = grouper_distribution(dataset, group_by, test_idx, class_names)
-
-        # print(f"Fold {fold + 1} - Train Distribution: {train_distribution}")
-        # print(f"Fold {fold + 1} - Test Distribution: {test_distribution}")
-
-        # Prepare train and test loaders for the current fold
+        # Prepare DataLoaders
         train_loader = DataLoader(Subset(dataset, train_idx), batch_size=batch_size, shuffle=True)
-        #train_loader = create_balanced_dataloader(Subset(dataset, train_idx), batch_size=batch_size)
-        
         test_loader = DataLoader(Subset(dataset, test_idx), batch_size=batch_size, shuffle=False)
 
-        # Alternatively, analyze distributions from DataLoaders
-        train_labels = []
-        for _, labels in train_loader:
-            train_labels.extend(labels.cpu().numpy())
+        if debug:
+            analyze_loader_distribution(train_loader, test_loader, class_names, fold)
 
-        train_distribution_from_loader = {class_name: train_labels.count(i) for i, class_name in enumerate(class_names)}
-        print(f"Fold {fold + 1} - [debug] Train Distribution from Loader: {train_distribution_from_loader}")
-
-        test_labels = []
-        for _, labels in test_loader:
-            test_labels.extend(labels.cpu().numpy())
-
-        test_distribution_from_loader = {class_name: test_labels.count(i) for i, class_name in enumerate(class_names)}
-        print(f"Fold {fold + 1} - [debug] Test Distribution from Loader: {test_distribution_from_loader}")
-
-        # Reset model to initial state and move to GPU
-        #debug 
-        # if isinstance(model, DeiTClassifier):
-        #     print("[debug - DeiT] Initial weight sample before reset:",  model.deit.classifier[1].weight[0][:5])  # Example layer and slice
-        # else: 
-        #     print("[debug - ViT] Initial weight sample before reset:",  model.vit.classifier.weight[0][:5])
+        # Reset model and optimizer
         model.load_state_dict(copy.deepcopy(initial_state))
-        # #debug 
-        # if isinstance(model, DeiTClassifier):
-        #     print("[debug - DeiT] Initial weight sample after reset:",  model.deit.classifier[1].weight[0][:5])  # Example layer and slice
-        # else: 
-        #     print("[debug - ViT] Initial weight sample after reset:",  model.vit.classifier.weight[0][:5])
-        
-        # Reinitialize the optimizer for each fold
-  
-        # Layer-Wise Learning Rate Decay (LRD)
-        # Layers closer to the output layer receive a higher learning rate than those closer to the input.
-        # This can help preserve the pre-trained representations.
-        if isinstance(model, DeiTClassifier):
-            optimizer = AdamW(
-            model.deit.parameters(),  # Include all parameters once
-            lr=lr,
-            weight_decay=0.01
-        )
-        else:  # For ViTClassifier or other models
-            optimizer = AdamW(
-            model.vit.vit.parameters(),  # Include all parameters once
-            lr=lr,
-            weight_decay=0.01
-            )        
-        # Define loss
-        criterion = nn.CrossEntropyLoss()
+        optimizer = create_optimizer(model, lr)
 
-        # Training Loop
-        for epoch in range(num_epochs):
-            model.train()
-            total_loss = 0.0
-            for images, labels in train_loader:
-                images, labels = images.to('cuda'), labels.to('cuda')
-                optimizer.zero_grad()
-                logits, attentions = model(images)
-                loss = criterion(logits, labels)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
+        # Train the model for this fold
+        train_model(model, train_loader, optimizer, num_epochs, debug)
 
-            print(f"Fold {fold + 1} | Epoch [{epoch + 1}/{num_epochs}], Loss: {total_loss / len(train_loader):.4f}")
+        # Evaluate the model for this fold
+        metrics, confusion_mat, all_labels, all_predictions, class_sample_indices = evaluate_model(model, test_loader, class_names, debug, class_sample_indices=class_sample_indices)
+        fold_metrics.append(metrics)
 
-        # Evaluation Loop
-        print("Evaluating Fold...")
+        experiment_name = f"{model_type.lower()}_experiment_fold{fold + 1}"
+        # Display confusion matrix
+        print_confusion_matrix(confusion_mat, class_names, output_dir="logs", experiment_name=experiment_name, all_labels=all_labels, all_predictions=all_predictions )
 
-        model.eval()
-        all_labels, all_predictions = [], []
-        # Track classes already visualized
-        visualized_classes = set()
+    # Summarize results across folds
+    summarize_kfold_results(fold_metrics)
+    
+    evaluate_full_model(model,test_loader)
 
-        # Create a dictionary to store one index per class for visualization
+def analyze_loader_distribution(train_loader, test_loader, class_names, fold):
+    """Analyzes the class distribution in the DataLoaders."""
+    for loader_name, loader in zip(["Train", "Test"], [train_loader, test_loader]):
+        labels = [label for _, label in loader.dataset]
+        distribution = {class_names[i]: labels.count(i) for i in range(len(class_names))}
+        print(f"Fold {fold + 1} - {loader_name} Distribution: {distribution}")
+
+def create_optimizer(model, lr):
+    """Creates an optimizer based on the model type."""
+    if isinstance(model, DeiTClassifier):
+        params = model.deit.parameters()
+    elif isinstance(model, ViTClassifier):
+        params = model.vit.parameters()
+    elif isinstance(model, DINOv2WithRegistersClassifier):
+        params = model.dinov2.parameters()
+    elif isinstance(model, SwinV2Classifier):
+        params = model.swinv2.parameters()
+    else:
+        raise ValueError("Unsupported model type.")
+
+    return AdamW(params, lr=lr, weight_decay=0.01)
+
+def train_model(model, train_loader, optimizer, num_epochs, debug=False):
+    """Trains the model for the specified number of epochs."""
+    criterion = nn.CrossEntropyLoss()
+    model.train()
+
+    for epoch in range(num_epochs):
+        total_loss = 0.0
+        for images, labels in train_loader:
+            images, labels = images.to("cuda"), labels.to("cuda")
+            optimizer.zero_grad()
+            logits, _ = model(images)
+            loss = criterion(logits, labels)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        if debug:
+            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {total_loss / len(train_loader):.4f}")
+
+def evaluate_model(model, test_loader, class_names, debug=False, class_sample_indices=None):
+    """Evaluates the model and returns metrics, confusion matrix, labels, and predictions."""
+    model.eval()
+    all_labels, all_predictions = [], []
+    # Initialize class_sample_indices if not provided
+    if class_sample_indices is None:
         class_sample_indices = {class_name: None for class_name in range(len(class_names))}
 
-        with torch.no_grad():
-            for idx, (images, labels) in enumerate(test_loader):
-                images, labels = images.to('cuda'), labels.to('cuda')
-                logits, attentions = model(images) 
-                # Visualize attention for the first 5 samples
-                # if idx < 2:
-                #     visualize_attention(
-                #         dataset=dataset,
-                #         model=model,
-                #         idx=idx,
-                #         attentions=attentions,
-                #         head=0,  # Visualize first attention head
-                #         layer=-1  # Visualize last attention layer
-                #     )
-                
-                # Store one index per class for visualization
-                for i, label in enumerate(labels.cpu().numpy()):
-                    if class_sample_indices[label] is None:
-                        class_sample_indices[label] = idx * len(labels) + i  # Global index in the dataset
-                               
-                _, predicted = torch.max(logits, 1)
-                all_labels.extend(labels.cpu().numpy())
-                all_predictions.extend(predicted.cpu().numpy())
-        
-        # Visualize attention for one sample per class
-        for class_id, sample_idx in class_sample_indices.items():
-            if sample_idx is not None:
-                print(f"Visualizing attention for class '{class_names[class_id]}' (index {sample_idx})...")
-                visualize_attention(
-                    dataset=dataset,
-                    model=model,
-                    idx=sample_idx,
-                    attentions=None,  # Let visualize_attention compute attentions
-                    head=0,  # Visualize first attention head
-                    layer=-1  # Visualize last attention layer
-                )
+    # Track which classes already have a representative sample
+    classes_found = set(class_sample_indices.keys()) if None not in class_sample_indices.values() else set()
 
-        # Check if there are predictions to evaluate
-        if all_labels:
-            accuracy = accuracy_score(all_labels, all_predictions) * 100
-            precision = precision_score(all_labels, all_predictions, average='weighted') * 100
-            recall = recall_score(all_labels, all_predictions, average='weighted') * 100
-            f1 = f1_score(all_labels, all_predictions, average='weighted') * 100
+    with torch.no_grad():
+        for idx, (images, labels) in enumerate(test_loader):
+            images, labels = images.to("cuda"), labels.to("cuda")
+            logits, attentions = model(images)
+            _, predictions = torch.max(logits, 1)
+            all_labels.extend(labels.cpu().numpy())
+            all_predictions.extend(predictions.cpu().numpy())
 
-            cm = confusion_matrix(all_labels, all_predictions, labels=np.arange(len(class_names)))
-            
-            print(f"Fold {fold + 1} Classification Report:")
-            report = classification_report(all_labels, 
-                                           all_predictions, 
-                                           target_names=class_names, 
-                                           labels=np.arange(len(class_names)), 
-                                           digits=4, 
-                                           zero_division=0)
-            print(report)
-            
-            print(f"Fold {fold + 1} Metrics:")
-            print(f"  - Accuracy: {accuracy:.2f}%")
-            print(f"  - Precision: {precision:.2f}%")
-            print(f"  - Recall: {recall:.2f}%")
-            print(f"  - F1-Score: {f1:.2f}%")
-                        
-            fold_metrics.append({
-                "accuracy": accuracy,
-                "precision": precision,
-                "recall": recall,
-                "f1": f1
-            })
-            
-            if isinstance(dataset, ConcatDataset):
-                root_dirs = [ds.root for ds in dataset.datasets if hasattr(ds, 'root')]
-                print("\nDataset Roots:", root_dirs)
-            else:
-                if hasattr(dataset, 'root'):
-                    print("\nDataset Root:", dataset.root)
-                else:
-                    print("\nDataset information not available.")            
-            
-            print_confusion_matrix(cm, class_names, all_labels, all_predictions)
-        else:
-            print(f"No test data for evaluation in Fold {fold + 1}. Accuracy cannot be computed.")
+            # Update representative samples for each class if not already set
+            for i, label in enumerate(labels.cpu().numpy()):
+                if label not in classes_found:
+                    class_sample_indices[label] = idx * test_loader.batch_size + i
+                    classes_found.add(label)
+                    if len(classes_found) == len(class_sample_indices):
+                        break
 
-    # Summary of cross-validation results
-    if fold_metrics:
-        mean_metrics = {key: np.mean([fold[key] for fold in fold_metrics]) for key in fold_metrics[0]}
-        print("\nCross-Validation Metrics Summary:")
-        print(f"  - Mean Accuracy: {mean_metrics['accuracy']:.2f}%")
-        print(f"  - Mean Precision: {mean_metrics['precision']:.2f}%")
-        print(f"  - Mean Recall: {mean_metrics['recall']:.2f}%")
-        print(f"  - Mean F1-Score: {mean_metrics['f1']:.2f}%")
-    else:
-        print("No valid folds with test data to compute cross-validation accuracy.")   
-        
-    evaluate_full_model(model, test_loader)  
+    # Compute metrics
+    accuracy = accuracy_score(all_labels, all_predictions) * 100
+    precision = precision_score(all_labels, all_predictions, average="weighted") * 100
+    recall = recall_score(all_labels, all_predictions, average="weighted") * 100
+    f1 = f1_score(all_labels, all_predictions, average="weighted") * 100
+    cm = confusion_matrix(all_labels, all_predictions)
 
+    if debug:
+        print("Classification Report:")
+        print(classification_report(all_labels, all_predictions, target_names=class_names))
+
+    # Visualize attention for representative samples of each class
+    print("\nVisualizing attention for representative samples:")
+    for class_id, sample_idx in class_sample_indices.items():
+        if sample_idx is not None:
+            print(f"Visualizing attention for class '{class_names[class_id]}' at index {sample_idx}...")
+            visualize_attention(
+                dataset=test_loader.dataset,
+                model=model,
+                idx=sample_idx,
+                attentions=None,  # Let `visualize_attention` compute attentions
+                head=0,  # First attention head
+                layer=-1  # Last attention layer
+            )
+
+    metrics = {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}
+    return metrics, cm, all_labels, all_predictions, class_sample_indices
+
+
+def summarize_kfold_results(fold_metrics):
+    """Summarizes the results across folds."""
+    if not fold_metrics:
+        print("No valid folds to summarize.")
+        return
+
+    mean_metrics = {key: np.mean([fold[key] for fold in fold_metrics]) for key in fold_metrics[0]}
+    print("\nK-Fold Cross-Validation Results:")
+    for key, value in mean_metrics.items():
+        print(f"  - Mean {key.capitalize()}: {value:.2f}%")
+ 
 def evaluate_full_model(model, test_loader):
     model.eval()
     all_labels, all_predictions = [], []
@@ -496,10 +509,10 @@ def visualize_attention(dataset, model, idx, attentions, head=0, layer=-1):
     
     # Plot spectrogram and attention map side-by-side
     fig, axs = plt.subplots(1, 2, figsize=(18, 8))
-    fig.suptitle(f"Attention Visualization for Sample {idx} - Class: {class_name}", fontsize=16)
+    fig.suptitle(f"Attention Visualization for Sample {idx} - Class: {class_name} - Label: {label}", fontsize=16)
 
     # Spectrogram
-    spectrogram_im = axs[0].imshow(spectrogram_np, cmap="jet", aspect='auto') # Force auto aspect ratio
+    spectrogram_im = axs[0].imshow(spectrogram_np, cmap="jet", aspect='auto', origin='lower') # Force auto aspect ratio
     #axs[0].imshow(attention_resized, cmap="plasma", alpha=0.5, aspect="auto") #Overlay attention on spectrogram
     axs[0].set_title("Original Spectrogram", fontsize=14)
     axs[0].set_ylabel("Frequency (Hz)", fontsize=12)
