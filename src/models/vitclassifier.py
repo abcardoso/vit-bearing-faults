@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
-from transformers import ViTForImageClassification, ViTConfig, ViTImageProcessor, DeiTForImageClassification, DeiTImageProcessor, AutoFeatureExtractor
+from transformers import ViTForImageClassification, ViTConfig, ViTImageProcessor, DeiTForImageClassification
+from transformers import DeiTImageProcessor, AutoFeatureExtractor, AutoImageProcessor, AutoModelForImageClassification
+from transformers import AutoModel
 from torchvision.transforms import ToPILImage
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 
@@ -77,7 +79,99 @@ class DeiTClassifier(nn.Module):
 
         output = self.deit(pixel_values=inputs)
         return output.logits, output.attentions
+
+class SwinV2Classifier(nn.Module):
+    def __init__(self, num_classes=4, dropout_rate=0.6, pretrained_model_name="microsoft/swinv2-tiny-patch4-window8-256"):
+        super(SwinV2Classifier, self).__init__()
+        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Initialize the processor for image preprocessing
+        self.processor = AutoImageProcessor.from_pretrained(pretrained_model_name)
+        
+        # Load the pretrained SwinV2 Transformer model
+        self.swinv2 = AutoModelForImageClassification.from_pretrained(
+            pretrained_model_name,
+            num_labels=num_classes,
+            output_attentions=True  # Enable attention outputs for interpretability
+        )
+        
+        # Replace the classifier with a custom head
+        self.swinv2.classifier = nn.Sequential(
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(self.swinv2.config.hidden_size, num_classes)
+        )
     
+    def forward(self, x):
+        # Convert tensors to PIL images for compatibility with the processor
+        to_pil = ToPILImage()
+        images = [to_pil(img) for img in x]
+
+        # Preprocess images with the processor
+        inputs = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
+
+        # Forward pass through the model
+        outputs = self.swinv2(pixel_values=inputs)
+        return outputs.logits, outputs.attentions  # Return logits and attention weights
+
+
+class DINOv2WithRegistersClassifier(nn.Module):
+    def __init__(self, num_classes=4, dropout_rate=0.6, pretrained_model_name="facebook/dinov2-with-registers-small"):
+        super(DINOv2WithRegistersClassifier, self).__init__()
+        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Initialize the processor for image preprocessing
+        self.processor = AutoImageProcessor.from_pretrained(pretrained_model_name)
+        
+        # Load the pretrained DINOv2 with registers model
+        self.dinov2 = AutoModel.from_pretrained(pretrained_model_name)
+        
+        # Add a classification head
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(self.dinov2.config.hidden_size, num_classes)
+        )
+    
+    def forward(self, x, output_attentions=False, return_dict=True):
+        """
+        Forward pass for the DINOv2WithRegistersClassifier.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, num_channels, height, width).
+            output_attentions (bool): Whether to return attention weights from the model.
+            return_dict (bool): Whether to return outputs as a dictionary.
+
+        Returns:
+            logits (torch.Tensor): Logits for classification.
+            attentions (tuple or None): Attention weights, if output_attentions=True.
+        """
+        # Convert tensors to PIL images for compatibility with the processor
+        to_pil = ToPILImage()
+        images = [to_pil(img) for img in x]
+
+        # Preprocess images with the processor
+        inputs = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
+
+        # Forward pass through the base model
+        outputs = self.dinov2(
+            pixel_values=inputs,
+            output_attentions=output_attentions,
+            return_dict=return_dict
+        )
+
+        # Extract the last hidden state for the [CLS] token
+        last_hidden_state = outputs.last_hidden_state  # Shape: (batch_size, sequence_length, hidden_size)
+        cls_embeddings = last_hidden_state[:, 0, :]  # Use the [CLS] token embeddings
+
+        # Pass the [CLS] token embeddings through the classifier
+        logits = self.classifier(cls_embeddings)
+
+        # Return logits and optionally attention weights
+        attentions = outputs.attentions if output_attentions else None
+        return logits, attentions
+
+
 # To train and save the model after training
 def train_and_save(model, train_loader, eval_loader, num_epochs, lr=0.001, save_path="deit_classifier.pth", patience=3, weight_decay=0.01):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
