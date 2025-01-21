@@ -29,7 +29,7 @@ def generate_spectrogram(metainfo, spectrogram_setup, signal_length, num_segment
             end_idx = start_idx + signal_length
             segment = detrended_data[start_idx:end_idx]
 
-            # Compute STFT
+            # Compute STFT (short-time Fourier transform)
             f, t, Sxx = signal.stft(segment, **spectrogram_setup)
 
             # Convert to decibels for better scaling

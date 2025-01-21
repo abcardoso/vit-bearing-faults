@@ -113,7 +113,7 @@ class UORED(BaseDataset):
         file_info = list(filter(lambda x: x["filename"]==basename, self.annotation_file))[0]
         
         label = file_info["label"]
-        data = matlab_file[basename][:, 0]
+        data = matlab_file[basename][:, 0] # Load accelerometer data select column to load up [:, 0] 0 for accelerometer, 1 for acoustic data
          
         if self.acquisition_maxsize:
             return data[:self.acquisition_maxsize], label
