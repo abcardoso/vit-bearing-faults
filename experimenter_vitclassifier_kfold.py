@@ -75,7 +75,8 @@ def experimenter_classifier_kfold(
     batch_size=32,
     root_dir="data/spectrograms",
     train_datasets_name=["CWRU"],
-    test_datasets_name=["UORED"]
+    test_datasets_name=["UORED"],
+    perform_kfold=True
 ):
     # Map model_type to corresponding class
     model_classes = {
@@ -83,6 +84,7 @@ def experimenter_classifier_kfold(
         "DeiT": DeiTClassifier,
         "DINOv2": DINOv2WithRegistersClassifier,
         "SwinV2": SwinV2Classifier,
+        "CNN2D": CNN2D
     }
 
     if model_type not in model_classes:
@@ -134,11 +136,11 @@ def experimenter_classifier_kfold(
 
     # Compute and print class distributions
     for dataset_name, dataset_loader in zip(train_datasets_name, [pretrain_train_loader]):
-        print(f"\n>> Calculating distribution for pre-train dataset ({dataset_name})...")
+        print(f"\n>> Calculating distribution for pre-train dataset (if used) ({dataset_name})...")
         compute_and_print_distribution(dataset_loader, class_to_idx, dataset_name)
 
     for dataset_name, dataset_loader in zip(test_datasets_name, [test_loader]):
-        print(f"\n>> Calculating distribution for test dataset ({dataset_name})...")
+        print(f"\n>> Calculating distribution for test dataset (TARGET dataset) ({dataset_name})...")
         compute_and_print_distribution(dataset_loader, class_to_idx, dataset_name)
 
     # Define model save path
@@ -196,7 +198,7 @@ def experimenter_classifier_kfold(
         group_by="", 
         class_names = list(class_to_idx.keys()), 
         n_splits=4,
-        perform_kfold=True,  # New parameter to toggle K-Fold Cross-Validation
+        perform_kfold=perform_kfold,  # New parameter to toggle K-Fold Cross-Validation
         debug=True
     )
     

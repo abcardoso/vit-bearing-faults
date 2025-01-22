@@ -323,6 +323,8 @@ def create_optimizer(model, lr):
         params = model.dinov2.parameters()
     elif isinstance(model, SwinV2Classifier):
         params = model.swinv2.parameters()
+    elif isinstance(model, CNN2D):
+        params = model.parameters()  # CNN2D uses all its parameters
     else:
         raise ValueError("Unsupported model type.")
 
@@ -385,19 +387,22 @@ def evaluate_model(model, test_loader, class_names, debug=False, class_sample_in
         print("Classification Report:")
         print(classification_report(all_labels, all_predictions, target_names=class_names))
 
-    # Visualize attention for representative samples of each class
-    print("\nVisualizing attention for representative samples:")
-    for class_id, sample_idx in class_sample_indices.items():
-        if sample_idx is not None:
-            print(f"Visualizing attention for class '{class_names[class_id]}' at index {sample_idx}...")
-            visualize_attention(
-                dataset=test_loader.dataset,
-                model=model,
-                idx=sample_idx,
-                attentions=None,  # Let `visualize_attention` compute attentions
-                head=0,  # First attention head
-                layer=-1  # Last attention layer
-            )
+    if hasattr(model, 'vit') or hasattr(model, 'deit') or hasattr(model, 'dinov2') or hasattr(model, 'swinv2'):
+        # Visualize attention for representative samples of each class
+        print("\nVisualizing attention for representative samples:")
+        for class_id, sample_idx in class_sample_indices.items():
+            if sample_idx is not None:
+                print(f"Visualizing attention for class '{class_names[class_id]}' at index {sample_idx}...")
+                visualize_attention(
+                    dataset=test_loader.dataset,
+                    model=model,
+                    idx=sample_idx,
+                    attentions=None,  # Let `visualize_attention` compute attentions
+                    head=0,  # First attention head
+                    layer=-1  # Last attention layer
+                )
+    else:
+         print("\nSkipping attention visualization as the model does not support it.")
 
     metrics = {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}
     return metrics, cm, all_labels, all_predictions, class_sample_indices

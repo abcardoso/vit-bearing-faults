@@ -52,9 +52,10 @@ def create_spectrograms():
 # EXPERIMENTERS
 def run_experimenter():
     #model = ResNet18() 
-    model_type="ViT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2"
+    model_type=""  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "CNN2D"
     pretrain_model=True # pretrain or use saved 
     base_model=False # base model with no pre-train strategy nor use of weights saved
+    perform_kfold=True
     
     experimenter_classifier_kfold(
         model_type=model_type,
@@ -68,16 +69,21 @@ def run_experimenter():
         batch_size=32,
         root_dir="data/spectrograms",
         train_datasets_name=["CWRU"],
-        test_datasets_name=["UORED"]
+        test_datasets_name=["UORED"],
+        perform_kfold=perform_kfold
     )
 
 
 if __name__ == '__main__':
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    print(f">> Start: {timestamp}")
     #download()
     #create_spectrograms()
     run_experimenter()
     
     
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    print(f">> End: {timestamp}")
     # Close the log file
     sys.stdout.close()
     sys.stdout = sys.__stdout__  # Reset stdout to the original
