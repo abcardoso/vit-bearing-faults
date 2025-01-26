@@ -2,7 +2,6 @@ import torch
 import os
 import torch.nn as nn
 import torchvision.transforms as T
-#from deepseek_vl2.models import DeepseekVLV2Processor, DeepseekVLV2ForCausalLM #deepseek-vl2 1.0.0 requires transformers==4.38.2
 from transformers import ViTForImageClassification, ViTConfig, ViTImageProcessor, DeiTForImageClassification
 from transformers import DeiTImageProcessor, AutoFeatureExtractor, AutoImageProcessor, AutoModelForImageClassification
 from transformers import AutoModel, AutoConfig
@@ -167,66 +166,6 @@ class DINOv2WithRegistersClassifier(nn.Module):
         logits = self.classifier(pooled_embeddings)
         attentions = outputs.attentions if output_attentions else None
         return logits, attentions
-
-# class DeepSeekVL2Classifier(nn.Module):
-#     def __init__(self, num_classes=4, dropout_rate=0.6, pretrained_model_name="deepseek-ai/deepseek-vl2-tiny"):
-#         super(DeepSeekVL2Classifier, self).__init__()
-        
-#         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-#         # Initialize the processor for image preprocessing
-#         self.processor = DeepseekVLV2Processor.from_pretrained(pretrained_model_name)
-
-#         # Load the DeepSeek-VL2 causal language model
-#         self.deepseek = DeepseekVLV2ForCausalLM.from_pretrained(
-#             pretrained_model_name,
-#             trust_remote_code=True  # Ensure custom implementation is used
-#         )
-
-#         # Replace the classification head with a custom head for image classification
-#         self.classifier_head = nn.Sequential(
-#             nn.Dropout(p=dropout_rate),
-#             nn.Linear(self.deepseek.config.hidden_size, num_classes, bias=False)
-#         )
-    
-#     def forward(self, x, output_attentions=True):
-#         """
-#         Perform a forward pass using DeepSeek-VL2 for spectrogram image classification.
-
-#         Args:
-#             x (torch.Tensor): A batch of spectrogram images as tensors.
-#             output_attentions (bool): Whether to output attention scores.
-
-#         Returns:
-#             Tuple[torch.Tensor, Optional[torch.Tensor]]:
-#                 logits: Logits for each class.
-#                 attentions: Attention scores (if `output_attentions` is True).
-#         """
-#         # Convert tensors to PIL images for compatibility with the processor
-#         to_pil = ToPILImage()
-#         images = [to_pil(img) for img in x]
-
-#         # Process the images using DeepseekVLV2Processor
-#         inputs = self.processor(images=images, return_tensors="pt").to(self.device)
-
-#         # Forward pass through the DeepSeek-VL2 causal language model
-#         outputs = self.deepseek(
-#             input_ids=inputs.input_ids,
-#             attention_mask=inputs.attention_mask,
-#             output_attentions=output_attentions
-#         )
-
-#         # Extract the last hidden state from the model's outputs
-#         hidden_states = outputs.last_hidden_state
-
-#         # Pool the last hidden state and apply the custom classifier head
-#         pooled_output = hidden_states[:, -1, :]  # Take the last token's output
-#         logits = self.classifier_head(pooled_output)
-
-#         # Extract attention outputs if needed
-#         attentions = outputs.attentions if output_attentions else None
-
-#         return logits, attentions
 
 # To train and save the model after training
 def train_and_save(model, train_loader, 
