@@ -20,3 +20,5 @@ data/**/**/*.png
 results/
 logs/
 .vscode/launch.json
+test.py
+pip_requirements.txt

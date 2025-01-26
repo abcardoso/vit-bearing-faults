@@ -52,7 +52,7 @@ def create_spectrograms():
 # EXPERIMENTERS
 def run_experimenter():
     #model = ResNet18() 
-    model_type=""  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "CNN2D"
+    model_type="DeiT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "CNN2D"
     pretrain_model=True # pretrain or use saved 
     base_model=False # base model with no pre-train strategy nor use of weights saved
     perform_kfold=True
@@ -68,9 +68,10 @@ def run_experimenter():
         lr_kf=0.00005,
         batch_size=32,
         root_dir="data/spectrograms",
-        train_datasets_name=["CWRU"],
-        test_datasets_name=["UORED"],
-        perform_kfold=perform_kfold
+        first_datasets_name=["CWRU"],
+        target_datasets_name=["UORED"],
+        perform_kfold=perform_kfold,
+        mode="supervised"  # "pretrain", "supervised", or "both"
     )
 
 

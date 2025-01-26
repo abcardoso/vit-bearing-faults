@@ -220,29 +220,19 @@ def kfold_cross_validation(
     group_by="",
     class_names=[],
     n_splits=4,
-    perform_kfold=True,  # New parameter to toggle K-Fold Cross-Validation
-    debug=False
+    perform_kfold=True, 
+    debug=False,
+    datasets_name=None
 ):
-    """
-    Performs K-Fold Cross-Validation or direct evaluation for models.
-    
-    Args:
-        model (nn.Module): Model to be validated.
-        test_loader (DataLoader): DataLoader for the test dataset.
-        num_epochs (int): Number of epochs for training in each fold.
-        lr (float): Learning rate.
-        group_by (str): Grouping criterion (optional).
-        class_names (list): List of class names.
-        n_splits (int): Number of folds for cross-validation.
-        perform_kfold (bool): Whether to perform K-Fold Cross-Validation.
-        debug (bool): If True, print debug information.
-    """
+   
+    datasets_str = ", ".join(datasets_name) if datasets_name else "Unknown Dataset"
+   
     batch_size = test_loader.batch_size
     dataset = test_loader.dataset
 
     if not perform_kfold:
         # Direct evaluation mode
-        print("Performing direct evaluation...")
+        print(f"Performing direct evaluation of: {datasets_str}")
         evaluate_model(model, test_loader, class_names, debug=debug)
         return
 
@@ -267,7 +257,7 @@ def kfold_cross_validation(
 
     print(f"Learning Rate: {lr}")
     #print(f"Starting K-Fold Cross-Validation... Model: {model_type.lower()}")
-    print(f"Starting K-Fold Cross-Validation...")
+    print(f"Starting K-Fold Cross-Validation of: {datasets_str}")
     
     # Initialize class_sample_indices before K-Fold
     class_sample_indices = None
