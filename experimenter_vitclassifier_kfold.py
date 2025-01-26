@@ -212,7 +212,7 @@ def experimenter_classifier_kfold(
     kfold_cross_validation(
         model,
         model_type,  
-        target_loader, #first_eval_loader,
+        first_eval_loader if set(target_datasets_name) == set(first_datasets_name) else target_loader,
         num_epochs = num_epochs_kf,
         lr = lr_kf, 
         group_by="", 

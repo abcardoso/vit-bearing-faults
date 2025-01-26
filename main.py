@@ -55,7 +55,7 @@ def run_experimenter():
     model_type="DeiT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "CNN2D"
     pretrain_model=True # pretrain or use saved 
     base_model=False # base model with no pre-train strategy nor use of weights saved
-    perform_kfold=True
+    perform_kfold=False
     
     experimenter_classifier_kfold(
         model_type=model_type,

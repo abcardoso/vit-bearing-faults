@@ -224,7 +224,6 @@ def kfold_cross_validation(
     debug=False,
     datasets_name=None
 ):
-   
     datasets_str = ", ".join(datasets_name) if datasets_name else "Unknown Dataset"
    
     batch_size = test_loader.batch_size
