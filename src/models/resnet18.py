@@ -17,4 +17,4 @@ class ResNet18(nn.Module):
         self.model.fc = nn.Linear(num_ftrs, num_classes)
 
     def forward(self, x):
-        return self.model(x)
+        return self.model(x), None

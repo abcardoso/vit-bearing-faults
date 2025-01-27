@@ -313,7 +313,9 @@ def create_optimizer(model, lr):
     elif isinstance(model, SwinV2Classifier):
         params = model.swinv2.parameters()
     elif isinstance(model, CNN2D):
-        params = model.parameters()  # CNN2D uses all its parameters
+        params = model.parameters()  
+    elif isinstance(model, ResNet18):
+        params = model.parameters()      
     else:
         raise ValueError("Unsupported model type.")
 

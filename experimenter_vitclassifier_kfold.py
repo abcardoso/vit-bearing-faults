@@ -64,7 +64,7 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
     print("[info] Mappings enforced successfully.")
 
 def experimenter_classifier_kfold(
-    model_type="DeiT",  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "DeepSeekVL2"
+    model_type="DeiT",  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "DeepSeekVL2", "CNN2D", "ResNet18"
     pretrain_model=False,
     base_model=True,
     num_classes=4,
@@ -87,7 +87,8 @@ def experimenter_classifier_kfold(
         "DeiT": DeiTClassifier,
         "DINOv2": DINOv2WithRegistersClassifier,
         "SwinV2": SwinV2Classifier,
-        "CNN2D": CNN2D
+        "CNN2D": CNN2D,
+        "ResNet18": ResNet18
         #,"DeepSeekVL2": DeepSeekVL2Classifier
     }
 
@@ -137,6 +138,7 @@ def experimenter_classifier_kfold(
         batch_size=batch_size, shuffle=False, num_workers=4
     )
     target_loader = DataLoader(target_concated_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    first_full_loader = DataLoader(first_concated_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
     # Compute and print class distributions
     for dataset_name, dataset_loader in zip(first_datasets_name, [first_train_loader]):
@@ -171,8 +173,12 @@ def experimenter_classifier_kfold(
                 print(f"Loading pretrained checkpoint from {pretrained_checkpoint}")
                 model = load_trained_model(model_class, pretrained_checkpoint, num_classes=num_classes, pretrained=True)
 
-            train_and_save(model, first_train_loader, first_eval_loader, 
-                           num_epochs, lr, saved_model_path,mode=mode, pretrain_epochs=num_epochs,teacher_model=teacher_model, datasets_name = first_datasets_name)
+            train_and_save(model, 
+                           first_full_loader, #first_train_loader, 
+                           first_eval_loader, 
+                           num_epochs, lr, saved_model_path,mode=mode, 
+                           pretrain_epochs=num_epochs,teacher_model=teacher_model, 
+                           datasets_name = first_datasets_name)
         else:
             print("Loading pre-trained model.")
             model = load_trained_model(model_class, saved_model_path, 
