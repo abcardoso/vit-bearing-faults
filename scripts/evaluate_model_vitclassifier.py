@@ -293,7 +293,7 @@ def kfold_cross_validation(
     # Summarize results across folds
     summarize_kfold_results(fold_metrics)
     
-    evaluate_full_model(model,test_loader)
+    #evaluate_full_model(model,test_loader)
 
 def analyze_loader_distribution(train_loader, test_loader, class_names, fold):
     """Analyzes the class distribution in the DataLoaders."""
@@ -375,7 +375,7 @@ def evaluate_model(model, test_loader, class_names, debug=False, class_sample_in
     cm = confusion_matrix(all_labels, all_predictions)
 
     if debug:
-        print("Classification Report:")
+        print("Final Test Evaluation Report:")
         print(classification_report(all_labels, all_predictions, target_names=class_names))
 
     if hasattr(model, 'vit') or hasattr(model, 'deit') or hasattr(model, 'dinov2') or hasattr(model, 'swinv2'):

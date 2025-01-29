@@ -174,7 +174,7 @@ def experimenter_classifier_kfold(
                 model = load_trained_model(model_class, pretrained_checkpoint, num_classes=num_classes, pretrained=True)
 
             train_and_save(model, 
-                           first_full_loader, #first_train_loader, 
+                           first_full_loader, #first_train_loader,  
                            first_eval_loader, 
                            num_epochs, lr, saved_model_path,mode=mode, 
                            pretrain_epochs=num_epochs,teacher_model=teacher_model, 
