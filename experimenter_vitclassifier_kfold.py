@@ -63,7 +63,7 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
             dataset.classes = list(desired_class_to_idx.keys())
     print("[info] Mappings enforced successfully.")
 
-def experimenter_classifier_kfold(
+def experimenter_classifier(
     model_type="DeiT",  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "DeepSeekVL2", "CNN2D", "ResNet18"
     pretrain_model=False,
     base_model=True,
@@ -175,7 +175,7 @@ def experimenter_classifier_kfold(
 
             train_and_save(model, 
                            first_full_loader, #first_train_loader,  
-                           first_eval_loader, 
+                           first_eval_loader, #not used
                            num_epochs, lr, saved_model_path,mode=mode, 
                            pretrain_epochs=num_epochs,teacher_model=teacher_model, 
                            datasets_name = first_datasets_name)
@@ -215,7 +215,7 @@ def experimenter_classifier_kfold(
     #     class_names = list(class_to_idx.keys())
     # )
     
-    kfold_cross_validation(
+    metrics = kfold_cross_validation(
         model,
         model_type,  
         first_eval_loader if set(target_datasets_name) == set(first_datasets_name) else target_loader,
@@ -228,10 +228,11 @@ def experimenter_classifier_kfold(
         debug=True,
         datasets_name=target_datasets_name #first_datasets_name
     )
+    return metrics
     
 
 def run_experimenter():     
-    experimenter_classifier_kfold(
+    experimenter_classifier(
         model_type="ViT",  
         pretrain_model=False,
         base_model=True,

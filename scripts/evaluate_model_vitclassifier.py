@@ -33,7 +33,7 @@ def print_confusion_matrix(confusion_matrix, class_names, output_dir, experiment
 
     # Save the figure with a timestamped filename
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    file_name = f"{output_dir}/{experiment_name}_confusion_matrix_{timestamp}.png"
+    file_name = f"{output_dir}/experiment_log_{timestamp}_confusion_matrix_{experiment_name}.png"
     plt.savefig(file_name, bbox_inches="tight", dpi=300)
 
     print(f"\nConfusion Matrix - {experiment_name}:")
@@ -291,9 +291,10 @@ def kfold_cross_validation(
         print_confusion_matrix(confusion_mat, class_names, output_dir="logs", experiment_name=experiment_name, all_labels=all_labels, all_predictions=all_predictions )
 
     # Summarize results across folds
-    summarize_kfold_results(fold_metrics)
+    mean_metrics = summarize_kfold_results(fold_metrics)
+    return mean_metrics
     
-    #evaluate_full_model(model,test_loader)
+    #evaluate_full_model(model,test_loader) - don't use this as it's getting the last kfold weights 
 
 def analyze_loader_distribution(train_loader, test_loader, class_names, fold):
     """Analyzes the class distribution in the DataLoaders."""
@@ -398,7 +399,6 @@ def evaluate_model(model, test_loader, class_names, debug=False, class_sample_in
     metrics = {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}
     return metrics, cm, all_labels, all_predictions, class_sample_indices
 
-
 def summarize_kfold_results(fold_metrics):
     """Summarizes the results across folds."""
     if not fold_metrics:
@@ -409,6 +409,8 @@ def summarize_kfold_results(fold_metrics):
     print("\nK-Fold Cross-Validation Results:")
     for key, value in mean_metrics.items():
         print(f"  - Mean {key.capitalize()}: {value:.2f}%")
+    
+    return mean_metrics
  
 def evaluate_full_model(model, test_loader):
     model.eval()
