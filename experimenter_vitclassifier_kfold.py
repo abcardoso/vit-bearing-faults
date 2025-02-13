@@ -184,7 +184,7 @@ def experimenter_classifier(
             model = load_trained_model(model_class, saved_model_path, 
                                        num_classes=num_classes, pretrained=pretrain_model).to("cuda")
     else:
-        print(f"Using raw base model {model_type}Classifier with no pre-training.")
+        print(f"Using base model {model_type}Classifier with no pre-training.")
 
     # Run k-fold cross-validation
     group_by = ""  # Modify this if needed
