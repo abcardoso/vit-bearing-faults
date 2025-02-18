@@ -381,7 +381,7 @@ def evaluate_model(model, test_loader, class_names, debug=False, class_sample_in
         print("Final Test Evaluation Report:")
         print(classification_report(all_labels, all_predictions, target_names=class_names))
 
-    if hasattr(model, 'vit') or hasattr(model, 'deit') or hasattr(model, 'dinov2') or hasattr(model, 'swinv2'):
+    if hasattr(model, 'vit') or hasattr(model, 'deit') or hasattr(model, 'dinov2') or hasattr(model, 'swinv2') or hasattr(model, 'mae'):
         # Visualize attention for representative samples of each class
         print("\nVisualizing attention for representative samples:")
         for class_id, sample_idx in class_sample_indices.items():

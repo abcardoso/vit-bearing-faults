@@ -194,7 +194,7 @@ class MAEClassifier(nn.Module):
         inputs = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
 
         # Pass through MAE model
-        outputs = self.mae(pixel_values=inputs)
+        outputs = self.mae(pixel_values=inputs, output_attentions=output_attentions)
 
         # Extract CLS token representation for classification
         cls_embedding = outputs.last_hidden_state[:, 0, :]
