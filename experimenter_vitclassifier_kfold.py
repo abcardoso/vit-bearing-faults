@@ -5,7 +5,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, ConcatDataset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
-from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier#, DeepSeekVL2Classifier 
+from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier, MAEClassifier #, DeepSeekVL2Classifier 
 from src.models.vitclassifier import train_and_save, load_trained_model
 from scripts.evaluate_model_vitclassifier import kfold_cross_validation, resubstitution_test, one_fold_with_bias, one_fold_without_bias, evaluate_full_model
 
@@ -64,7 +64,7 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
     print("[info] Mappings enforced successfully.")
 
 def experimenter_classifier(
-    model_type="DeiT",  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "DeepSeekVL2", "CNN2D", "ResNet18"
+    model_type="DeiT",  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "DeepSeekVL2", "MAE", "CNN2D", "ResNet18"
     pretrain_model=False,
     base_model=True,
     num_classes=4,
@@ -87,6 +87,7 @@ def experimenter_classifier(
         "DeiT": DeiTClassifier,
         "DINOv2": DINOv2WithRegistersClassifier,
         "SwinV2": SwinV2Classifier,
+        "MAE": MAEClassifier,
         "CNN2D": CNN2D,
         "ResNet18": ResNet18
         #,"DeepSeekVL2": DeepSeekVL2Classifier

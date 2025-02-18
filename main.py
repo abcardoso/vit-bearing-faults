@@ -64,7 +64,7 @@ def create_spectrograms():
 # EXPERIMENTERS
 def run_experimenter():
     #model = ResNet18() 
-    model_type="DINOv2"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "CNN2D", "ResNet18"
+    model_type="MAE"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
     pretrain_model=True # pretrain or use saved 
     base_model=False # base model with no pre-train strategy neither use of weights saved
     perform_kfold=True

@@ -10,7 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from datetime import datetime
 import sys
 import os
-from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier
+from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier,MAEClassifier
 from src.data_processing import SpectrogramImageDataset
 from torch.optim import Adam, AdamW
 from torch.utils.data import DataLoader, Subset, ConcatDataset, WeightedRandomSampler
@@ -313,6 +313,8 @@ def create_optimizer(model, lr):
         params = model.dinov2.parameters()
     elif isinstance(model, SwinV2Classifier):
         params = model.swinv2.parameters()
+    elif isinstance(model, MAEClassifier):
+        params = model.mae.parameters()
     elif isinstance(model, CNN2D):
         params = model.parameters()  
     elif isinstance(model, ResNet18):

@@ -4,7 +4,7 @@ import torch.nn as nn
 import torchvision.transforms as T
 from transformers import ViTForImageClassification, ViTConfig, ViTImageProcessor, DeiTForImageClassification
 from transformers import DeiTImageProcessor, AutoFeatureExtractor, AutoImageProcessor, AutoModelForImageClassification
-from transformers import AutoModel, AutoConfig
+from transformers import AutoModel, AutoConfig, ViTMAEModel
 from transformers import Dinov2WithRegistersModel,Dinov2WithRegistersConfig, Dinov2WithRegistersForImageClassification #Dinov2WithRegistersModel requires transformers==4.48
 from torchvision.transforms import ToPILImage
 from torch.nn.functional import cosine_similarity
@@ -165,6 +165,44 @@ class DINOv2WithRegistersClassifier(nn.Module):
         # Pass through the classification head
         logits = self.classifier(pooled_embeddings)
         attentions = outputs.attentions if output_attentions else None
+        return logits, attentions
+
+class MAEClassifier(nn.Module):
+    def __init__(self, num_classes=4, dropout_rate=0.6, pretrained_model_name="facebook/vit-mae-base"):
+        super(MAEClassifier, self).__init__()
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Load image processor for preprocessing spectrograms
+        self.processor = AutoImageProcessor.from_pretrained(pretrained_model_name)
+
+        # Load pre-trained MAE encoder
+        self.mae = ViTMAEModel.from_pretrained(pretrained_model_name)
+
+        # Add classification head
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(self.mae.config.hidden_size, num_classes)  # Fully connected layer for classification
+        )
+
+    def forward(self, x, output_attentions=True):
+        # Convert tensors to PIL images for compatibility with processor
+        to_pil = ToPILImage()
+        images = [to_pil(img) for img in x]
+
+        # Preprocess images using Hugging Face processor
+        inputs = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
+
+        # Pass through MAE model
+        outputs = self.mae(pixel_values=inputs)
+
+        # Extract CLS token representation for classification
+        cls_embedding = outputs.last_hidden_state[:, 0, :]
+
+        # Pass through the classifier head
+        logits = self.classifier(cls_embedding)
+        attentions = outputs.attentions if output_attentions else None
+
         return logits, attentions
 
 # To train and save the model after training
