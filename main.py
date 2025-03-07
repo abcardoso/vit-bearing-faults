@@ -6,6 +6,8 @@ from utils import load_yaml
 from utils.dual_output import DualOutput  # Import the class from dual_output.py
 from experimenter_vitclassifier_kfold import experimenter_classifier
 from run_pretrain import experimenter
+from datasets.uored import UORED
+from datasets.cwru import CWRU
 import sys
 import pandas as pd
 from datetime import datetime
@@ -29,7 +31,9 @@ if not os.path.exists(csv_filename):
         "model_type", "pretrain_model", "base_model", "num_classes",
         "num_epochs", "lr", "num_epochs_kf", "lr_kf", "batch_size", "rootdir",
         "first_datasets_name", "target_datasets_name", "perform_kfold",
-        "mode","timestamp", "accuracy", "precision", "recall", "f1_score", "log_file","endtime"
+        "mode","timestamp", "accuracy", "precision", "recall", "f1_score", 
+        "log_file","endtime","use_domain_split",
+        "domain_name" 
     ]).to_csv(csv_filename, index=False)
 
 
@@ -53,21 +57,39 @@ def create_spectrograms():
     for dataset_name in spectrogram_config.keys():
         print(f"Starting the creation of the {dataset_name} spectrograms.")
         filter = filter_config[dataset_name]
+        
+        # Instantiate the dataset class based on dataset_name
+        if dataset_name == "UORED":
+            dataset = UORED(use_domain_split=True, domain_name="1")  # Adjust domain name dynamically
+        elif dataset_name == "CWRU":
+            dataset = CWRU()
+        else:
+            raise ValueError(f"Unknown dataset: {dataset_name}")
+
+        # Ensure dataset directory exists
+        dataset_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), "default")
+        os.makedirs(dataset_output_dir, exist_ok=True)
+        
         data_manager = DatasetManager(dataset_name)
         metainfo = data_manager.filter_data(filter)
         signal_length = spectrogram_config[dataset_name]["Split"]["signal_length"]
         spectrogram_setup = spectrogram_config[dataset_name]["Spectrogram"]
         
         # Creation of spectrograms    
-        generate_spectrogram(metainfo, spectrogram_setup, signal_length, num_segments) 
+        generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments) 
+        
+        print(f"Completed spectrogram generation for {dataset_name}. Directory: {dataset_output_dir}")
 
 # EXPERIMENTERS
 def run_experimenter():
     #model = ResNet18() 
-    model_type="MAE"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
-    pretrain_model=True # pretrain or use saved 
-    base_model=False # base model with no pre-train strategy neither use of weights saved
+    model_type="DeiT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
+    pretrain_model=False # pretrain or use saved 
+    base_model=True # base model with no pre-train strategy neither use of weights saved
     perform_kfold=True
+    
+    use_domain_split = True  # Toggle domain-based splitting
+    domain_name = "1"  # Choose domain from 1 to 10 based on Sehri et al.
     
     experiment_params = {
         "model_type": model_type,
@@ -80,10 +102,13 @@ def run_experimenter():
         "lr_kf": 0.0001,
         "batch_size": 32,
         "root_dir": "data/spectrograms",
-        "first_datasets_name": ["CWRU"],
+        "first_datasets_name": ["UORED"],
         "target_datasets_name": ["UORED"],
         "perform_kfold": perform_kfold,
-        "mode": "supervised"  # "pretrain", "supervised", or "both"
+        "mode": "supervised",  # "pretrain", "supervised", or "both"
+        "use_domain_split": use_domain_split,
+        "domain_name": domain_name
+
     }
     
     metrics = experimenter_classifier(

@@ -34,6 +34,13 @@ class BaseDataset(ABC):
         if not os.path.exists(self._rawfilesdir):
             os.makedirs(self._rawfilesdir)
 
+    def get_domain_folder(self, label):
+        """
+        By default, datasets do not use domain-based splitting.
+        This method should be overridden if domain-based logic is needed.
+        """
+        return ""  # Default: No domain-based folder separation
+
     def list_of_bearings(self):
         pass
 

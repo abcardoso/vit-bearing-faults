@@ -4,9 +4,11 @@ from scipy import signal
 from matplotlib import pyplot as plt
 from datasets import CWRU, Paderborn, Hust, UORED
 
-def generate_spectrogram(metainfo, spectrogram_setup, signal_length, num_segments=None):
-    dataset_name = metainfo[0]["dataset_name"]
-    dataset = eval(dataset_name + "()")
+def generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments=None):
+    dataset_name = dataset.__class__.__name__.lower()
+    #dataset = eval(dataset_name + "()")
+
+    domain_folder = dataset.get_domain_folder("")
 
     for info in metainfo:
         basename = info["filename"]
@@ -42,12 +44,13 @@ def generate_spectrogram(metainfo, spectrogram_setup, signal_length, num_segment
             ax.axis('off')
 
             # Save the spectrogram
-            output = os.path.join('data/spectrograms', dataset_name.lower(), label,
-                                   f"{basename}#{i+1}.png")
-            
-            #output = os.path.join('data/spectrograms', dataset_name.lower(), label, basename+'#{}.png'.format(int((i+1)/signal_length)))
-            plt.savefig(output, bbox_inches='tight', pad_inches=0)
-            print(f"Spectrogram {output} - created.")
+            output_dir = os.path.join('data/spectrograms', dataset_name.lower(), domain_folder, label)
+            os.makedirs(output_dir, exist_ok=True)  # Ensure directory exists
+
+            output_path = os.path.join(output_dir, f"{basename}#{i+1}.png")
+        
+            plt.savefig(output_path, bbox_inches='tight', pad_inches=0)
+            print(f"Spectrogram {output_path} - created.")
             plt.close(fig)
             
 

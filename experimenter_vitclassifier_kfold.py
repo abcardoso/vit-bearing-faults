@@ -8,6 +8,8 @@ from torchvision.datasets import ImageFolder
 from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier, MAEClassifier #, DeepSeekVL2Classifier 
 from src.models.vitclassifier import train_and_save, load_trained_model
 from scripts.evaluate_model_vitclassifier import kfold_cross_validation, resubstitution_test, one_fold_with_bias, one_fold_without_bias, evaluate_full_model
+from datasets.uored import UORED
+from datasets.cwru import CWRU
 
 import sys
 import logging
@@ -43,25 +45,34 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
         datasets (list): List of ImageFolder datasets.
         desired_class_to_idx (dict): The desired class-to-index mapping.
     """
+
     for dataset in datasets:
         dataset_class_to_idx = dataset.class_to_idx
         
-        # Check if the dataset's mapping matches the desired mapping
-        if dataset_class_to_idx != desired_class_to_idx:
-            print(f"[warning] Dataset mapping {dataset_class_to_idx} does not match desired {desired_class_to_idx}. Remapping...")
-            
-            # Reorder the samples according to the desired mapping
-            new_samples = []
-            for path, label in dataset.samples:
-                class_name = dataset.classes[label]  # Get class name from current label
-                new_label = desired_class_to_idx[class_name]  # Map to desired label
-                new_samples.append((path, new_label))
-            
-            # Update dataset's samples and class_to_idx
-            dataset.samples = new_samples
-            dataset.class_to_idx = desired_class_to_idx
-            dataset.classes = list(desired_class_to_idx.keys())
-    print("[info] Mappings enforced successfully.")
+        # Identify unexpected classes
+        unexpected_classes = set(dataset_class_to_idx.keys()) - set(desired_class_to_idx.keys())
+        if unexpected_classes:
+            print(f"[WARNING] Ignoring unexpected classes in dataset: {unexpected_classes}")
+
+        # Create new mapping for valid classes only
+        valid_samples = []
+        for path, label in dataset.samples:
+            class_name = dataset.classes[label]  # Get class name from current label
+
+            # Skip samples that belong to unexpected classes
+            if class_name not in desired_class_to_idx:
+                continue  
+
+            new_label = desired_class_to_idx[class_name]  # Map to desired label
+            valid_samples.append((path, new_label))
+
+        # Update dataset with only valid samples
+        dataset.samples = valid_samples
+        dataset.class_to_idx = desired_class_to_idx
+        dataset.classes = list(desired_class_to_idx.keys())
+
+    print("[INFO] Mappings enforced successfully.")
+
 
 def experimenter_classifier(
     model_type="DeiT",  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "DeepSeekVL2", "MAE", "CNN2D", "ResNet18"
@@ -77,7 +88,9 @@ def experimenter_classifier(
     first_datasets_name=["CWRU"],
     target_datasets_name=["UORED"],
     perform_kfold=True,
-    mode="supervised"  # "pretrain", "supervised", or "both"
+    mode="supervised",  # "pretrain", "supervised", or "both"
+    use_domain_split=False,
+    domain_name=None
 ):
     print(f"Experiment Parameters: {locals()}")
     
@@ -110,6 +123,54 @@ def experimenter_classifier(
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
+    datasets = []
+    for ds_name in first_datasets_name + target_datasets_name:
+        if ds_name == "UORED":
+            dataset_instance = UORED(use_domain_split, domain_name)
+        elif ds_name == "CWRU":
+            dataset_instance = CWRU()
+        else:
+            raise ValueError(f"Dataset {ds_name} not recognized.")
+
+        # Ensure correct path for UORED with domain split
+        if ds_name == "UORED":
+            dataset_path = os.path.join(root_dir, "uored")  # Remove domain_name from here
+        else:
+            dataset_path = os.path.join(root_dir, ds_name.lower())
+
+        # Retrieve domain folder (returns "" when use_domain_split=False)
+        domain_folder = dataset_instance.get_domain_folder("")
+
+        # Append domain folder only when it is not empty
+        if domain_folder:
+            dataset_path = os.path.join(dataset_path, domain_folder)
+
+        # Debugging check: Print the final dataset path to verify correctness
+        print(f"[DEBUG] Loading dataset from: {dataset_path}")
+
+        if not os.path.exists(dataset_path) or not os.listdir(dataset_path):
+            raise FileNotFoundError(
+                f"Error: The dataset folder {dataset_path} is missing or empty!\n"
+                "Ensure spectrograms are generated correctly."
+            )
+
+        # Ensure ImageFolder() is loading from a directory that contains class folders
+        if not any(os.scandir(dataset_path)):
+            raise FileNotFoundError(
+                f"Error: The dataset folder {dataset_path} exists but is empty.\n"
+                "Make sure `generate_spectrogram()` ran correctly before executing the experiment."
+            )
+
+        # Check if dataset_path needs class subfolders (Only for CWRU)
+        if ds_name == "CWRU":
+            dataset_path = os.path.join(root_dir, ds_name.lower())  # Ensure class directories are included
+
+        # Debugging print statement
+        print(f"[DEBUG] Final dataset path for ImageFolder: {dataset_path}") 
+
+        dataset = ImageFolder(dataset_path, transform=transform)
+        datasets.append(dataset)
+        
     # Load train and test datasets
     first_datasets = [ImageFolder(os.path.join(root_dir, ds.lower()), transform) for ds in first_datasets_name]
     target_datasets = [ImageFolder(os.path.join(root_dir, ds.lower()), transform) for ds in target_datasets_name]
@@ -245,7 +306,11 @@ def run_experimenter():
         first_datasets_name=["CWRU"],
         target_datasets_name=["UORED"],
         perform_kfold=True,
-        mode="supervised"  # "pretrain", "supervised", or "both"
+        mode="supervised",  # "pretrain", "supervised", or "both"
+        use_domain_split= False,
+        domain_name= None
+
+    
     )
 
 if __name__ == "__main__":

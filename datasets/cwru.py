@@ -53,6 +53,11 @@ class CWRU(BaseDataset):
         super().__init__(rawfilesdir = "data/raw/cwru",
                          url = "https://engineering.case.edu/sites/default/files/")
 
+
+    def get_domain_folder(self, label):
+        return ""  # No default folder; use dataset root path
+
+
     def _extract_data(self, filepath):
         """ Extracts data from a .mat file for bearing fault analysis.
         Args:

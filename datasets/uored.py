@@ -26,17 +26,43 @@ class UORED(BaseDataset):
         __str__(): Returns a string representation of the dataset.
     """
     
-    def __init__(self):        
+    def __init__(self, use_domain_split=False, domain_name=None):        
         super().__init__(rawfilesdir = "data/raw/uored",
                          url = "https://prod-dcd-datasets-public-files-eu-west-1.s3.eu-west-1.amazonaws.com/")
+
+        self.use_domain_split = use_domain_split
+        self.domain_name = domain_name
+
+        # Define domain mapping (from Sehri et al. 2024)
+        self.domain_mapping = {
+            "1": ["H-1-0", "I-1-1", "O-6-1", "B-11-1", "C-16-1"],
+            "2": ["H-2-0", "I-1-2", "O-6-2", "B-11-2", "C-16-2"],
+            "3": ["H-3-0", "I-2-1", "O-7-1", "B-12-1", "C-17-1"],
+            "4": ["H-4-0", "I-2-2", "O-7-2", "B-12-2", "C-17-2"],
+            "5": ["H-5-0", "I-3-1", "O-8-1", "B-13-1", "C-18-1"],
+            "6": ["H-6-0", "I-3-2", "O-8-2", "B-13-2", "C-18-2"],
+            "7": ["H-7-0", "I-4-1", "O-9-1", "B-14-1", "C-19-1"],
+            "8": ["H-8-0", "I-4-2", "O-9-2", "B-14-2", "C-19-2"],
+            "9": ["H-9-0", "I-5-1", "O-10-1", "B-15-1", "C-20-1"],
+            "10": ["H-10-0", "I-5-2", "O-10-2", "B-15-2", "C-20-2"],
+        }
     
+    def get_domain_folder(self, label):
+        """
+        Determines the correct folder name for saving spectrograms.
+        If domain-based splitting is enabled, return the domain folder.
+        """
+        if self.use_domain_split and self.domain_name:
+            return f"domain_{self.domain_name}"
+        return ""
+             
     def list_of_bearings(self):
         """ 
         Returns: 
             A list of tuples containing filenames (for naming downloaded files) and URL suffixes 
             for downloading vibration data.
         """
-        return [
+        all_bearings = [
         ("H_1_0", "31863372-55f7-4c9c-91a5-4f3c907a85af"),
         ("H_2_0", "7615c4b8-7c8f-41fd-8034-5b6e8438eb16"),
         ("H_3_0", "e5abb9af-727e-4fd5-8238-0d007f4be6d6"),
@@ -98,6 +124,12 @@ class UORED(BaseDataset):
         ("C_20_1", "4ceb3588-37b6-4f62-baa4-c64cbf0179a5"),
         ("C_20_2", "8e8a485f-6fe9-4439-8f93-743a7ac431ec"),
         ]
+        
+        if self.use_domain_split and self.domain_name in self.domain_mapping:
+            selected_files = set(self.domain_mapping[self.domain_name])
+            return [b for b in all_bearings if b[0] in selected_files]
+        
+        return all_bearings
 
     def _extract_data(self, filepath):
         """ Extracts data from a .mat file for bearing fault analysis.
