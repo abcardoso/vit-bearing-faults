@@ -3,6 +3,7 @@ import os
 import numpy as np
 from utils.download_extract import download_file
 from datasets.base_dataset import BaseDataset
+from torchvision.datasets import ImageFolder
 
 
 class UORED(BaseDataset):    
@@ -26,12 +27,13 @@ class UORED(BaseDataset):
         __str__(): Returns a string representation of the dataset.
     """
     
-    def __init__(self, use_domain_split=False, domain_name=None):        
+    def __init__(self, use_domain_split=True, train_domains=None, test_domain=None):        
         super().__init__(rawfilesdir = "data/raw/uored",
                          url = "https://prod-dcd-datasets-public-files-eu-west-1.s3.eu-west-1.amazonaws.com/")
 
         self.use_domain_split = use_domain_split
-        self.domain_name = domain_name
+        self.train_domains = train_domains if train_domains else []
+        self.test_domain = test_domain if test_domain else ""
 
         # Define domain mapping (from Sehri et al. 2024)
         self.domain_mapping = {
@@ -46,15 +48,51 @@ class UORED(BaseDataset):
             "9": ["H-9-0", "I-5-1", "O-10-1", "B-15-1", "C-20-1"],
             "10": ["H-10-0", "I-5-2", "O-10-2", "B-15-2", "C-20-2"],
         }
+        if self.use_domain_split:
+            print(f">> UORED Initialized | Train Domains: {self.train_domains} | Test Domain: {self.test_domain}")
+        else:
+            print(f">> UORED Initialized in **Non-Split Mode** (Entire Dataset Used)")
+
+    def get_data_by_domain(self, domain):
+        """
+        Retrieves the data for the given domain.
+        """
+        if self.use_domain_split:
+            if domain in self.train_domains:
+                print(f"Loading ***Training/Validation*** data for domain {domain}")
+            elif domain == self.test_domain:
+                print(f"Loading ***Test*** data for domain {domain}")
+            else:
+                raise ValueError(f"Domain {domain} is not configured for this dataset.")
+        else:
+            print(f"Loading **Full UORED Dataset (No domain split)**")
+
+        return self.load_data_from_directory(domain)
     
-    def get_domain_folder(self, label):
+    def get_domain_folder(self, is_test=False):
         """
         Determines the correct folder name for saving spectrograms.
         If domain-based splitting is enabled, return the domain folder.
         """
-        if self.use_domain_split and self.domain_name:
-            return f"domain_{self.domain_name}"
+        if self.use_domain_split:
+            if is_test and self.test_domain:
+                return f"domain_{self.test_domain}"  # Test domain folder
+            elif self.train_domains:
+                return f"train_domains_{'_'.join(self.train_domains)}"  # Merged train domains
         return ""
+
+
+    def load_data_from_directory(self, domain):
+        """
+        Load spectrograms from the corresponding domain directory.
+        """
+        domain_path = os.path.join("data/spectrograms/uored", domain)
+        if not os.path.exists(domain_path):
+            raise FileNotFoundError(f"Missing spectrogram directory: {domain_path}")
+
+        # Load spectrogram images
+        print(f"Loading spectrograms from {domain_path}")
+        return ImageFolder(domain_path)
              
     def list_of_bearings(self):
         """ 
@@ -125,10 +163,12 @@ class UORED(BaseDataset):
         ("C_20_2", "8e8a485f-6fe9-4439-8f93-743a7ac431ec"),
         ]
         
-        if self.use_domain_split and self.domain_name in self.domain_mapping:
-            selected_files = set(self.domain_mapping[self.domain_name])
+        if self.use_domain_split:
+            selected_files = set()
+            for domain in self.train_domains + [self.test_domain]:
+                selected_files.update(self.domain_mapping.get(domain, []))
             return [b for b in all_bearings if b[0] in selected_files]
-        
+
         return all_bearings
 
     def _extract_data(self, filepath):
@@ -142,7 +182,12 @@ class UORED(BaseDataset):
         matlab_file = scipy.io.loadmat(filepath)
         
         basename = os.path.basename(filepath).split('.')[0]
-        file_info = list(filter(lambda x: x["filename"]==basename, self.annotation_file))[0]
+        #file_info = list(filter(lambda x: x["filename"]==basename, self.annotation_file))[0]
+        
+        file_info = next((x for x in self.annotation_file if x["filename"] == basename), None)
+        if not file_info:
+            raise ValueError(f"No annotation found for {basename}")
+
         
         label = file_info["label"]
         data = matlab_file[basename][:, 0] # Load accelerometer data select column to load up [:, 0] 0 for accelerometer, 1 for acoustic data

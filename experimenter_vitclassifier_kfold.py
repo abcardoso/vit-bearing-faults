@@ -90,7 +90,8 @@ def experimenter_classifier(
     perform_kfold=True,
     mode="supervised",  # "pretrain", "supervised", or "both"
     use_domain_split=False,
-    domain_name=None
+    train_domains=None,
+    test_domain=None
 ):
     print(f"Experiment Parameters: {locals()}")
     
@@ -126,55 +127,56 @@ def experimenter_classifier(
     datasets = []
     for ds_name in first_datasets_name + target_datasets_name:
         if ds_name == "UORED":
-            dataset_instance = UORED(use_domain_split, domain_name)
+            if use_domain_split:
+                if not train_domains or not test_domain:
+                    raise ValueError("For UORED with domain split, both `train_domains` and `test_domain` must be specified.")
+                dataset_instance = UORED(use_domain_split=True, train_domains=train_domains, test_domain=test_domain)
+                print(f"Processing UORED with Train/Validation domains {train_domains} and Test domain {test_domain}")
+            else:
+                dataset_instance = UORED(use_domain_split=False)  # Full dataset, no domain split
+                print("Processing UORED without domain splits.")        
         elif ds_name == "CWRU":
             dataset_instance = CWRU()
+            print("Processing CWRU without domain splits.")
         else:
-            raise ValueError(f"Dataset {ds_name} not recognized.")
+            raise ValueError(f"Unknown dataset: {ds_name}")
 
-        # Ensure correct path for UORED with domain split
-        if ds_name == "UORED":
-            dataset_path = os.path.join(root_dir, "uored")  # Remove domain_name from here
-        else:
-            dataset_path = os.path.join(root_dir, ds_name.lower())
-
-        # Retrieve domain folder (returns "" when use_domain_split=False)
-        domain_folder = dataset_instance.get_domain_folder("")
-
-        # Append domain folder only when it is not empty
-        if domain_folder:
-            dataset_path = os.path.join(dataset_path, domain_folder)
-
-        # Debugging check: Print the final dataset path to verify correctness
-        print(f"[DEBUG] Loading dataset from: {dataset_path}")
+        # **Determine dataset paths**
+        dataset_path = os.path.join(root_dir, ds_name.lower())
+        
+        if use_domain_split and ds_name == "UORED":
+            dataset_path = os.path.join(dataset_path, f"train_domains_{'_'.join(train_domains)}")
 
         if not os.path.exists(dataset_path) or not os.listdir(dataset_path):
-            raise FileNotFoundError(
-                f"Error: The dataset folder {dataset_path} is missing or empty!\n"
-                "Ensure spectrograms are generated correctly."
-            )
+            raise FileNotFoundError(f"Error: The dataset folder {dataset_path} is missing or empty! Ensure spectrograms are generated correctly.")
 
-        # Ensure ImageFolder() is loading from a directory that contains class folders
-        if not any(os.scandir(dataset_path)):
-            raise FileNotFoundError(
-                f"Error: The dataset folder {dataset_path} exists but is empty.\n"
-                "Make sure `generate_spectrogram()` ran correctly before executing the experiment."
-            )
-
-        # Check if dataset_path needs class subfolders (Only for CWRU)
-        if ds_name == "CWRU":
-            dataset_path = os.path.join(root_dir, ds_name.lower())  # Ensure class directories are included
-
-        # Debugging print statement
-        print(f"[DEBUG] Final dataset path for ImageFolder: {dataset_path}") 
+        print(f"[DEBUG] Final dataset path for ImageFolder: {dataset_path}")
 
         dataset = ImageFolder(dataset_path, transform=transform)
         datasets.append(dataset)
         
     # Load train and test datasets
-    first_datasets = [ImageFolder(os.path.join(root_dir, ds.lower()), transform) for ds in first_datasets_name]
-    target_datasets = [ImageFolder(os.path.join(root_dir, ds.lower()), transform) for ds in target_datasets_name]
+    first_datasets = []
+    target_datasets = []
 
+    for ds_name in first_datasets_name:
+        dataset_path = os.path.join(root_dir, ds_name.lower())
+
+        if ds_name == "UORED" and use_domain_split:
+            dataset_path = os.path.join(dataset_path, f"train_domains_{'_'.join(train_domains)}")
+
+        print(f"[DEBUG] Loading First Dataset from: {dataset_path}")
+        first_datasets.append(ImageFolder(dataset_path, transform))
+
+    for ds_name in target_datasets_name:
+        dataset_path = os.path.join(root_dir, ds_name.lower())
+
+        if ds_name == "UORED" and use_domain_split:
+            dataset_path = os.path.join(dataset_path, f"test_domain_{test_domain}")
+
+        print(f"[DEBUG] Loading Target Dataset from: {dataset_path}")
+        target_datasets.append(ImageFolder(dataset_path, transform))
+        
     # Enforce consistent mapping
     enforce_consistent_mapping(first_datasets, class_to_idx)
     enforce_consistent_mapping(target_datasets, class_to_idx)
@@ -288,7 +290,9 @@ def experimenter_classifier(
         n_splits=4,
         perform_kfold=perform_kfold,  # New parameter to toggle K-Fold Cross-Validation
         debug=True,
-        datasets_name=target_datasets_name #first_datasets_name
+        datasets_name=target_datasets_name, #first_datasets_name
+        train_domains=train_domains,  # Multiple domains for Train/Validation
+        test_domain=test_domain  # Single domain for Test
     )
     return metrics
     

@@ -31,9 +31,10 @@ if not os.path.exists(csv_filename):
         "model_type", "pretrain_model", "base_model", "num_classes",
         "num_epochs", "lr", "num_epochs_kf", "lr_kf", "batch_size", "rootdir",
         "first_datasets_name", "target_datasets_name", "perform_kfold",
-        "mode","timestamp", "accuracy", "precision", "recall", "f1_score", 
-        "log_file","endtime","use_domain_split",
-        "domain_name" 
+        "mode","use_domain_split","train_domains","test_domain","start", 
+        "accuracy", "precision", "recall", "f1_score",
+        "train_accuracy","validation_accuracy","test_accuracy", 
+        "log_file","endtime"        
     ]).to_csv(csv_filename, index=False)
 
 
@@ -43,7 +44,7 @@ def download():
         download_rawfile(dataset)
 
 # SPECTROGRAMS
-def create_spectrograms():
+def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=None):
 
     # Sets the number of segments
     num_segments = 20
@@ -60,36 +61,66 @@ def create_spectrograms():
         
         # Instantiate the dataset class based on dataset_name
         if dataset_name == "UORED":
-            dataset = UORED(use_domain_split=True, domain_name="1")  # Adjust domain name dynamically
+            if use_domain_split:
+                if not train_domains or not test_domain:
+                    raise ValueError("For UORED with domain split, both `train_domains` and `test_domain` must be specified.")
+                
+                dataset = UORED(use_domain_split=True, train_domains=train_domains, test_domain=test_domain)
+                print(f"Processing UORED with Train/Validation domains {train_domains} and Test domain {test_domain}")
+            else:
+                dataset = UORED(use_domain_split=False)
+                print("Processing UORED without domain splits.")
         elif dataset_name == "CWRU":
             dataset = CWRU()
+            print("Processing CWRU without domain splits.")
         else:
             raise ValueError(f"Unknown dataset: {dataset_name}")
 
+
         # Ensure dataset directory exists
-        dataset_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), "default")
+        dataset_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), "")
         os.makedirs(dataset_output_dir, exist_ok=True)
         
         data_manager = DatasetManager(dataset_name)
         metainfo = data_manager.filter_data(filter)
         signal_length = spectrogram_config[dataset_name]["Split"]["signal_length"]
         spectrogram_setup = spectrogram_config[dataset_name]["Spectrogram"]
-        
+ 
+        train_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), f"train_domains_{'_'.join(train_domains)}")
+        os.makedirs(train_output_dir, exist_ok=True)
+       
         # Creation of spectrograms    
-        generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments) 
-        
-        print(f"Completed spectrogram generation for {dataset_name}. Directory: {dataset_output_dir}")
+        #generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments) 
+        if dataset_name == "UORED" and use_domain_split:
+            for train_domain in train_domains:
+                print(f"Generating spectrograms for Train/Validation domain: {train_domain}")
+                dataset.train_domains = [train_domain]  # Update domain in dataset instance
+                generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments, output_dir=train_output_dir)
 
+            # Generate spectrograms for the test domain separately
+            test_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), f"test_domain_{test_domain}")
+            print(f"Generating spectrograms for Test domain: {test_domain}")
+            dataset.test_domain = test_domain  # Update dataset instance for test domain
+            generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments, output_dir=test_output_dir)
+        
+        else:
+            print(f"Generating spectrograms for {dataset_name} (No domain split).")
+            generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments)
+      
+        print(f"Completed spectrogram generation for {dataset_name}. Directory: {dataset_output_dir}")
+        
+                
 # EXPERIMENTERS
 def run_experimenter():
     #model = ResNet18() 
-    model_type="DeiT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
+    model_type="ViT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
     pretrain_model=False # pretrain or use saved 
     base_model=True # base model with no pre-train strategy neither use of weights saved
     perform_kfold=True
     
     use_domain_split = True  # Toggle domain-based splitting
-    domain_name = "1"  # Choose domain from 1 to 10 based on Sehri et al.
+    train_domains=["2", "4", "6", "8"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
+    test_domain="10"
     
     experiment_params = {
         "model_type": model_type,
@@ -98,7 +129,7 @@ def run_experimenter():
         "num_classes": 4,
         "num_epochs": 20,
         "lr": 0.00005,
-        "num_epochs_kf": 16,
+        "num_epochs_kf": 30,
         "lr_kf": 0.0001,
         "batch_size": 32,
         "root_dir": "data/spectrograms",
@@ -107,8 +138,8 @@ def run_experimenter():
         "perform_kfold": perform_kfold,
         "mode": "supervised",  # "pretrain", "supervised", or "both"
         "use_domain_split": use_domain_split,
-        "domain_name": domain_name
-
+        "train_domains": train_domains,
+        "test_domain": test_domain
     }
     
     metrics = experimenter_classifier(
@@ -120,16 +151,23 @@ def run_experimenter():
     precision = metrics.get("precision", "N/A")
     recall = metrics.get("recall", "N/A")
     f1_score = metrics.get("f1", "N/A")
+    train_accuracy = metrics.get("train_accuracy","N/A")
+    validation_accuracy = metrics.get("validation_accuracy","N/A")
+    test_accuracy = metrics.get("test_accuracy","N/A")
+    
     endtime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     # Append results to CSV
     result_data = {
         **experiment_params,
-        "timestamp": timestamp,
+        "start": timestamp,
         "accuracy": accuracy,
         "precision": precision,
         "recall": recall,
         "f1_score": f1_score,
+        "train_accuracy": train_accuracy,
+        "validation_accuracy": validation_accuracy,
+        "test_accuracy": test_accuracy,
         "log_file": log_filename,
         "endtime":endtime
     }
@@ -143,8 +181,13 @@ def run_experimenter():
 if __name__ == '__main__':
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     print(f">> Start: {timestamp}")
+    
+    use_domain_split = True  # Toggle domain-based splitting
+    train_domains=["2", "4", "6", "8"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
+    test_domain="10"
+    
     #download()
-    #create_spectrograms()
+    #create_spectrograms(use_domain_split, train_domains,test_domain) 
     run_experimenter()
     
     

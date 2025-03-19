@@ -2,14 +2,17 @@ import numpy as np
 import copy
 import torch
 import cv2
+import sys
+import os
+from datasets import UORED, CWRU
 import seaborn as sns
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import csv
+from torchvision.datasets import ImageFolder
 from mpl_toolkits.mplot3d import Axes3D
 from datetime import datetime
-import sys
-import os
 from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier,MAEClassifier
 from src.data_processing import SpectrogramImageDataset
 from torch.optim import Adam, AdamW
@@ -210,6 +213,72 @@ def one_fold_without_bias(model, dataset, num_epochs, lr, class_names):
     #print('Confusion Matrix:\n', cm) 
     #print(dataset.get_dataset_name())
     print_confusion_matrix(cm, class_names, all_labels, all_predictions)
+
+def load_datasets(root_dir, first_datasets_name, target_datasets_name, use_domain_split, domain_name, transform):
+    """
+    Load datasets with proper train-validation-test splits.
+    """
+    train_datasets, val_datasets, test_dataset = [], [], None
+
+    for ds_name in first_datasets_name + target_datasets_name:
+        if ds_name == "UORED":
+            dataset_instance = UORED(use_domain_split, domain_name)
+            base_path = os.path.join(root_dir, "uored")
+
+            if use_domain_split:
+                all_domains = dataset_instance.get_all_domains()
+                train_domains = [d for d in all_domains if d != domain_name]  # Exclude test domain
+                test_domain = domain_name  # Only one test domain
+
+                # Train and Validation Data
+                for train_domain in train_domains:
+                    train_val_path = os.path.join(base_path, train_domain)
+                    if os.path.exists(train_val_path) and os.listdir(train_val_path):
+                        dataset = ImageFolder(train_val_path, transform=transform)
+                        train_size = int(0.8 * len(dataset))
+                        val_size = len(dataset) - train_size
+                        train_subset, val_subset = torch.utils.data.random_split(dataset, [train_size, val_size])
+                        train_datasets.append(train_subset)
+                        val_datasets.append(val_subset)
+                    else:
+                        print(f"[WARNING] Skipping empty domain folder: {train_val_path}")
+
+                # Test Data
+                test_path = os.path.join(base_path, test_domain)
+                if os.path.exists(test_path) and os.listdir(test_path):
+                    test_dataset = ImageFolder(test_path, transform=transform)
+                else:
+                    raise FileNotFoundError(f"Error: Test dataset folder {test_path} is missing or empty!")
+
+            else:
+                dataset_path = os.path.join(base_path, "default")
+                if os.path.exists(dataset_path) and os.listdir(dataset_path):
+                    dataset = ImageFolder(dataset_path, transform=transform)
+                    train_size = int(0.8 * len(dataset))
+                    val_size = int(0.1 * len(dataset))
+                    test_size = len(dataset) - train_size - val_size
+                    train_subset, val_subset, test_subset = torch.utils.data.random_split(dataset, [train_size, val_size, test_size])
+                    train_datasets.append(train_subset)
+                    val_datasets.append(val_subset)
+                    test_dataset = test_subset
+                else:
+                    raise FileNotFoundError(f"Error: Dataset folder {dataset_path} is missing or empty!")
+
+        elif ds_name == "CWRU":
+            dataset_path = os.path.join(root_dir, ds_name.lower())
+            if os.path.exists(dataset_path) and os.listdir(dataset_path):
+                dataset = ImageFolder(dataset_path, transform=transform)
+                train_size = int(0.8 * len(dataset))
+                val_size = int(0.1 * len(dataset))
+                test_size = len(dataset) - train_size - val_size
+                train_subset, val_subset, test_subset = torch.utils.data.random_split(dataset, [train_size, val_size, test_size])
+                train_datasets.append(train_subset)
+                val_datasets.append(val_subset)
+                test_dataset = test_subset
+            else:
+                raise FileNotFoundError(f"Error: Dataset folder {dataset_path} is missing or empty!")
+
+    return train_datasets, val_datasets, test_dataset
     
 def kfold_cross_validation(
     model,
@@ -222,7 +291,9 @@ def kfold_cross_validation(
     n_splits=4,
     perform_kfold=True, 
     debug=False,
-    datasets_name=None
+    datasets_name=None,
+    train_domains=None,  # Multiple domains for Train/Validation
+    test_domain=None  # Single domain for Test
 ):
     datasets_str = ", ".join(datasets_name) if datasets_name else "Unknown Dataset"
    
@@ -253,6 +324,7 @@ def kfold_cross_validation(
     # Save initial model state
     initial_state = copy.deepcopy(model.state_dict())
     fold_metrics = []
+    results_list = []
 
     print(f"Learning Rate: {lr}")
     #print(f"Starting K-Fold Cross-Validation... Model: {model_type.lower()}")
@@ -267,9 +339,15 @@ def kfold_cross_validation(
         if len(train_idx) == 0 or len(test_idx) == 0:
             print(f"Skipping Fold {fold + 1}: Empty train or test set.")
             continue
+        
+        # **Split train into train and validation (80-20)**
+        train_idx, val_idx = train_test_split(
+            train_idx, test_size=0.2, stratify=[y[i] for i in train_idx], random_state=42
+        )
 
         # Prepare DataLoaders
         train_loader = DataLoader(Subset(dataset, train_idx), batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(Subset(dataset, val_idx), batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(Subset(dataset, test_idx), batch_size=batch_size, shuffle=False)
 
         if debug:
@@ -278,22 +356,50 @@ def kfold_cross_validation(
         # Reset model and optimizer
         model.load_state_dict(copy.deepcopy(initial_state))
         optimizer = create_optimizer(model, lr)
+        
+        # Train the model with validation
+        train_acc_list, val_acc_list = train_model(model, train_loader, val_loader, optimizer, num_epochs)
 
-        # Train the model for this fold
-        train_model(model, train_loader, optimizer, num_epochs, debug)
-
-        # Evaluate the model for this fold
-        metrics, confusion_mat, all_labels, all_predictions, class_sample_indices = evaluate_model(model, test_loader, class_names, debug, class_sample_indices=class_sample_indices)
-        fold_metrics.append(metrics)
+        # Evaluate on test set
+        test_metrics, confusion_mat, all_labels, all_predictions, class_sample_indices = evaluate_model(
+            model, test_loader, class_names, debug, class_sample_indices=class_sample_indices
+        )
+        fold_metrics.append(test_metrics)
 
         experiment_name = f"{model_type.lower()}_experiment_fold{fold + 1}"
         # Display confusion matrix
-        print_confusion_matrix(confusion_mat, class_names, output_dir="logs", experiment_name=experiment_name, all_labels=all_labels, all_predictions=all_predictions )
+        print_confusion_matrix(confusion_mat, class_names, output_dir="logs", 
+                               experiment_name=experiment_name, all_labels=all_labels, 
+                               all_predictions=all_predictions )
+        results_list.append({
+            "Fold": fold + 1,
+            "Train Accuracy": train_acc_list[-1],  # Last epoch accuracy
+            "Validation Accuracy": val_acc_list[-1],  # Last epoch validation accuracy
+            "Test Accuracy": test_metrics["accuracy"],
+        })
+
 
     # Summarize results across folds
     mean_metrics = summarize_kfold_results(fold_metrics)
-    return mean_metrics
+
+    # Compute Mean Accuracies for CSV
+    mean_train_acc = np.mean([r['Train Accuracy'] for r in results_list])
+    mean_val_acc = np.mean([r['Validation Accuracy'] for r in results_list])
+    mean_test_acc = mean_metrics["accuracy"]
+
+    # Print final summary
+    print("\n **Final K-Fold Cross-Validation Summary**")
+    print(f"   **Mean Train Accuracy:** {mean_train_acc:.2f}%")
+    print(f"   **Mean Validation Accuracy:** {mean_val_acc:.2f}%")
+    print(f"   **Mean Test Accuracy:** {mean_test_acc:.2f}%")
     
+    # Return values to be saved in CSV
+    return {
+        **mean_metrics,
+        "train_accuracy": mean_train_acc,
+        "validation_accuracy": mean_val_acc,
+        "test_accuracy": mean_test_acc      
+    }    
     #evaluate_full_model(model,test_loader) - don't use this as it's getting the last kfold weights 
 
 def analyze_loader_distribution(train_loader, test_loader, class_names, fold):
@@ -324,24 +430,54 @@ def create_optimizer(model, lr):
 
     return AdamW(params, lr=lr, weight_decay=0.01)
 
-def train_model(model, train_loader, optimizer, num_epochs, debug=False):
-    """Trains the model for the specified number of epochs."""
+def train_model(model, train_loader, val_loader, optimizer, num_epochs):
+    """
+    Train the model while logging training and validation accuracy.
+    """
     criterion = nn.CrossEntropyLoss()
-    model.train()
+    train_acc_list, val_acc_list = [], []
 
     for epoch in range(num_epochs):
-        total_loss = 0.0
+        model.train()
+        correct_train, total_train, running_loss = 0, 0, 0.0
+
         for images, labels in train_loader:
             images, labels = images.to("cuda"), labels.to("cuda")
             optimizer.zero_grad()
-            logits, _ = model(images)
-            loss = criterion(logits, labels)
+            outputs = model(images)
+            if isinstance(outputs, tuple):  #Extract logits if a tuple is returned
+                outputs = outputs[0]
+            loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-            total_loss += loss.item()
+            
+            _, predicted = torch.max(outputs, 1)
+            total_train += labels.size(0)
+            correct_train += (predicted == labels).sum().item()
+            running_loss += loss.item()
 
-        if debug:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {total_loss / len(train_loader):.4f}")
+        train_accuracy = 100 * correct_train / total_train
+        train_acc_list.append(train_accuracy)
+
+        # Validation
+        model.eval()
+        correct_val, total_val = 0, 0
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to("cuda"), labels.to("cuda")
+                outputs = model(images)
+                if isinstance(outputs, tuple):  #Extract logits if a tuple is returned
+                    outputs = outputs[0]
+                _, predicted = torch.max(outputs, 1)
+                total_val += labels.size(0)
+                correct_val += (predicted == labels).sum().item()
+
+        val_accuracy = 100 * correct_val / total_val
+        val_acc_list.append(val_accuracy)
+
+        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss:.4f}, Train Acc: {train_accuracy:.2f}%, Val Acc: {val_accuracy:.2f}%")
+
+    return train_acc_list, val_acc_list
 
 def evaluate_model(model, test_loader, class_names, debug=False, class_sample_indices=None):
     """Evaluates the model and returns metrics, confusion matrix, labels, and predictions."""
