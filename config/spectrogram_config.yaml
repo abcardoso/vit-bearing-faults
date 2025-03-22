@@ -1,12 +1,12 @@
-CWRU:
-  Spectrogram:
-    nfft: 1024
-    fs: 48000
-    nperseg: 512
-    noverlap: 384
-    window: 'hann'
-  Split:
-    signal_length: 12000
+# CWRU:
+#   Spectrogram:
+#     nfft: 1024
+#     fs: 48000
+#     nperseg: 512
+#     noverlap: 384
+#     window: 'hann'
+#   Split:
+#     signal_length: 12000
 # Hust:
 #   Spectrogram:
 #     nfft: 1600
@@ -24,10 +24,18 @@ CWRU:
 #   signal_length: 640
 UORED:
   Spectrogram:
-    nfft: 1024
+    nfft: 2048 #1024
     fs: 42000
-    nperseg: 512
-    noverlap: 384
+    nperseg: 1024 #512
+    noverlap: 896 #384
     window: 'hann'
   Split:
-    signal_length: 10500
+    signal_length: 10500 #2048 #10500
+
+
+# # Define parameters for spectrogram computation
+# # sampling frequency of 42,000
+# fs = 42000
+# nperseg = 505 # segments for the image
+# noverlap = 460 # over lap per image used
+# segment_size = 512 # setting size of image

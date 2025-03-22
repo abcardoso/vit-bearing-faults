@@ -4,7 +4,7 @@ from scripts.copy_spectrogram_to_folds import copy_spectrogram_to_folds
 from src.data_processing.dataset_manager import DatasetManager
 from utils import load_yaml
 from utils.dual_output import DualOutput  # Import the class from dual_output.py
-from experimenter_vitclassifier_kfold import experimenter_classifier
+from experimenter_vitclassifier_kfold import experimenter_classifier, experimenter_classifier_v2
 from run_pretrain import experimenter
 from datasets.uored import UORED
 from datasets.cwru import CWRU
@@ -30,11 +30,12 @@ if not os.path.exists(csv_filename):
     pd.DataFrame(columns=[
         "model_type", "pretrain_model", "base_model", "num_classes",
         "num_epochs", "lr", "num_epochs_kf", "lr_kf", "batch_size", "rootdir",
-        "first_datasets_name", "target_datasets_name", "perform_kfold",
-        "mode","use_domain_split","train_domains","test_domain","start", 
+        "dataset_name", "perform_kfold",
+        "mode", "use_domain_split", "train_domains", "test_domain",
+        "start", "endtime", "time_spent",  # Added time_spent column
         "accuracy", "precision", "recall", "f1_score",
-        "train_accuracy","validation_accuracy","test_accuracy", 
-        "log_file","endtime"        
+        "train_accuracy", "validation_accuracy", "test_accuracy",
+        "log_file", "preprocessing"
     ]).to_csv(csv_filename, index=False)
 
 
@@ -44,7 +45,7 @@ def download():
         download_rawfile(dataset)
 
 # SPECTROGRAMS
-def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=None):
+def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=None, preprocessing="none"):
 
     # Sets the number of segments
     num_segments = 20
@@ -95,33 +96,31 @@ def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=
             for train_domain in train_domains:
                 print(f"Generating spectrograms for Train/Validation domain: {train_domain}")
                 dataset.train_domains = [train_domain]  # Update domain in dataset instance
-                generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments, output_dir=train_output_dir)
+                generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments, output_dir=train_output_dir, preprocessing=preprocessing)
 
             # Generate spectrograms for the test domain separately
             test_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), f"test_domain_{test_domain}")
             print(f"Generating spectrograms for Test domain: {test_domain}")
             dataset.test_domain = test_domain  # Update dataset instance for test domain
-            generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments, output_dir=test_output_dir)
+            generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments, output_dir=test_output_dir, preprocessing=preprocessing )
         
         else:
             print(f"Generating spectrograms for {dataset_name} (No domain split).")
-            generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments)
+            generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments,preprocessing=preprocessing)
       
-        print(f"Completed spectrogram generation for {dataset_name}. Directory: {dataset_output_dir}")
+        print(f"Completed spectrogram generation for {dataset_name}; signal_length: {signal_length} ; spectrogram_setup: {spectrogram_setup}; preprocessing {preprocessing}. Directory: {dataset_output_dir} ")
         
                 
 # EXPERIMENTERS
-def run_experimenter():
-    #model = ResNet18() 
-    model_type="ViT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
-    pretrain_model=False # pretrain or use saved 
-    base_model=True # base model with no pre-train strategy neither use of weights saved
-    perform_kfold=True
+def run_experimenter(use_domain_split=False, train_domains=None, test_domain=None, preprocessing="none",
+                     model_type="CNN2D", pretrain_model=False, base_model=True, perform_kfold=True):
     
-    use_domain_split = True  # Toggle domain-based splitting
-    train_domains=["2", "4", "6", "8"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
-    test_domain="10"
+    start_time = datetime.now()
     
+    dataset_name = "UORED"
+    first_datasets_name=dataset_name
+    target_datasets_name=dataset_name
+        
     experiment_params = {
         "model_type": model_type,
         "pretrain_model": pretrain_model,
@@ -130,19 +129,18 @@ def run_experimenter():
         "num_epochs": 20,
         "lr": 0.00005,
         "num_epochs_kf": 30,
-        "lr_kf": 0.0001,
+        "lr_kf": 0.00005,
         "batch_size": 32,
         "root_dir": "data/spectrograms",
-        "first_datasets_name": ["UORED"],
-        "target_datasets_name": ["UORED"],
+        "dataset_name": dataset_name,
         "perform_kfold": perform_kfold,
         "mode": "supervised",  # "pretrain", "supervised", or "both"
         "use_domain_split": use_domain_split,
         "train_domains": train_domains,
         "test_domain": test_domain
     }
-    
-    metrics = experimenter_classifier(
+       
+    metrics = experimenter_classifier_v2(
         **experiment_params
     )
 
@@ -155,12 +153,15 @@ def run_experimenter():
     validation_accuracy = metrics.get("validation_accuracy","N/A")
     test_accuracy = metrics.get("test_accuracy","N/A")
     
-    endtime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    end_time = datetime.now()
+    time_spent = (end_time - start_time).total_seconds()  # Compute time spent in seconds
 
     # Append results to CSV
     result_data = {
         **experiment_params,
-        "start": timestamp,
+        "start": start_time.strftime("%Y-%m-%d-%H-%M-%S"),
+        "endtime": end_time.strftime("%Y-%m-%d-%H-%M-%S"),
+        "time_spent": time_spent,  # New column
         "accuracy": accuracy,
         "precision": precision,
         "recall": recall,
@@ -169,7 +170,7 @@ def run_experimenter():
         "validation_accuracy": validation_accuracy,
         "test_accuracy": test_accuracy,
         "log_file": log_filename,
-        "endtime":endtime
+        "preprocessing":preprocessing
     }
     
     df = pd.DataFrame([result_data])
@@ -185,10 +186,21 @@ if __name__ == '__main__':
     use_domain_split = True  # Toggle domain-based splitting
     train_domains=["2", "4", "6", "8"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
     test_domain="10"
+    preprocessing = "rms" # "zscore" (Standardization) "rms" (Root Mean Square) "none"
+    model_type="DINOv2"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
+    pretrain_model=False # pretrain or use saved 
+    base_model=True # base model with no pre-train strategy neither use of weights saved
+    perform_kfold=True
+    create_sp = False
+    download_raw = False
     
-    #download()
-    #create_spectrograms(use_domain_split, train_domains,test_domain) 
-    run_experimenter()
+    if download_raw:
+        download()
+    if create_sp:
+        create_spectrograms(use_domain_split, train_domains, test_domain, preprocessing) 
+    
+    run_experimenter(use_domain_split, train_domains, test_domain, preprocessing,
+                     model_type, pretrain_model, base_model, perform_kfold)
     
     
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")

@@ -2,12 +2,12 @@ import torch
 import os
 import copy
 from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader, ConcatDataset, Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier, MAEClassifier #, DeepSeekVL2Classifier 
 from src.models.vitclassifier import train_and_save, load_trained_model
-from scripts.evaluate_model_vitclassifier import kfold_cross_validation, resubstitution_test, one_fold_with_bias, one_fold_without_bias, evaluate_full_model
+from scripts.evaluate_model_vitclassifier import kfold_cross_validation, kfold_validation, resubstitution_test, one_fold_with_bias, one_fold_without_bias, evaluate_full_model
 from datasets.uored import UORED
 from datasets.cwru import CWRU
 
@@ -72,7 +72,6 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
         dataset.classes = list(desired_class_to_idx.keys())
 
     print("[INFO] Mappings enforced successfully.")
-
 
 def experimenter_classifier(
     model_type="DeiT",  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "DeepSeekVL2", "MAE", "CNN2D", "ResNet18"
@@ -215,7 +214,7 @@ def experimenter_classifier(
 
     # Define model save path
     saved_model_path = f"saved_models/{model_type.lower()}_classifier.pth"
-    print_info("Experiment", [f"Transfer Learning with {model_type}Classifier"])
+    print_info("Experiment", [f"*** Experiment with {model_type}Classifier"])
     if not base_model:
         print(f"Saved model path: {saved_model_path}")
 
@@ -296,6 +295,106 @@ def experimenter_classifier(
     )
     return metrics
     
+def experimenter_classifier_v2(
+    model_type="DeiT",
+    pretrain_model=False,
+    base_model=True,
+    num_classes=4,
+    num_epochs=20,
+    lr=0.00005,
+    num_epochs_kf=10,
+    lr_kf=0.00005,
+    batch_size=32,
+    root_dir="data/spectrograms",
+    dataset_name="UORED",
+    perform_kfold=True,
+    mode="supervised",
+    use_domain_split=False,
+    train_domains=None,
+    test_domain=None
+):
+    print(f"Experiment Parameters: {locals()}")
+
+    # === Model setup ===
+    model_classes = {
+        "ViT": ViTClassifier,
+        "DeiT": DeiTClassifier,
+        "DINOv2": DINOv2WithRegistersClassifier,
+        "SwinV2": SwinV2Classifier,
+        "MAE": MAEClassifier,
+        "CNN2D": CNN2D,
+        "ResNet18": ResNet18
+    }
+    if model_type not in model_classes:
+        raise ValueError(f"Unsupported model type: {model_type}")
+
+    model_class = model_classes[model_type]
+    model = model_class(num_classes=num_classes).to("cuda")
+
+    # === Class mapping and transforms ===
+    class_to_idx = {"B": 0, "I": 1, "N": 2, "O": 3}
+    class_names = list(class_to_idx.keys())
+
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    # === Path handling ===
+    if dataset_name == "UORED":
+        if use_domain_split:
+            if not train_domains or not test_domain:
+                raise ValueError("train_domains and test_domain must be specified for domain split.")
+            train_path = os.path.join(root_dir, "uored", f"train_domains_{'_'.join(train_domains)}")
+            test_path = os.path.join(root_dir, "uored", f"test_domain_{test_domain}")
+        else:
+            train_path = os.path.join(root_dir, "uored")
+            test_path = train_path
+    elif dataset_name == "CWRU":
+        train_path = test_path = os.path.join(root_dir, "cwru")
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
+
+    if not os.path.exists(train_path):
+        raise FileNotFoundError(f"Missing training path: {train_path}")
+    if not os.path.exists(test_path):
+        raise FileNotFoundError(f"Missing test path: {test_path}")
+
+    # === Load datasets ===
+    full_train_dataset = ImageFolder(train_path, transform=transform)
+    test_dataset = ImageFolder(test_path, transform=transform)
+
+    enforce_consistent_mapping([full_train_dataset, test_dataset], class_to_idx)
+
+    train_val_loader = DataLoader(full_train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    print(f"[DEBUG] Data split - Total Train+Val: {len(full_train_dataset)}, Test: {len(test_dataset)}")
+
+    if not base_model:
+        raise NotImplementedError("Pre-trained model strategy is not implemented in this version.")
+
+    print(f"Using base model {model_type}Classifier with no pre-training.")
+
+    # === Run K-Fold with separate test ===
+    metrics = kfold_validation(
+        model=model,
+        model_type=model_type,
+        train_val_loader=train_val_loader,
+        test_loader=test_loader,
+        num_epochs=num_epochs_kf,
+        lr=lr_kf,
+        class_names=class_names,
+        n_splits=4,
+        debug=True,
+        patience=6
+    )
+
+    return metrics
+
+
+
 
 def run_experimenter():     
     experimenter_classifier(

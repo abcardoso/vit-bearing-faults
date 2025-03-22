@@ -4,7 +4,8 @@ from scipy import signal
 from matplotlib import pyplot as plt
 from datasets import CWRU, Paderborn, Hust, UORED
 
-def generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments=None, output_dir=None):
+def generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, 
+                         num_segments=None, output_dir=None, preprocessing="zscore"):
     dataset_name = dataset.__class__.__name__.lower()
     #dataset = eval(dataset_name + "()")
 
@@ -13,16 +14,22 @@ def generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, nu
     
     os.makedirs(output_dir, exist_ok=True)  # Ensure the directory exists
 
+    if spectrogram_setup["noverlap"] >= spectrogram_setup["nperseg"]:
+        raise ValueError("Error: `noverlap` must be less than `nperseg`.")
 
     for info in metainfo:
         basename = info["filename"]
         filepath = os.path.join('data/raw/', dataset_name.lower(), basename + '.mat')
 
-        # Load signal and label
-        data, label = dataset.load_signal_by_path(filepath)
-
-        # Normalize and detrend the signal
-        data = (data - np.mean(data)) / np.std(data)  # Z-score normalization
+        data, label = dataset.load_signal_by_path(filepath) #Load accelerometer data
+        
+        if preprocessing == "zscore": # Z-score normalization
+            data = (data - np.mean(data)) / np.std(data)
+        elif preprocessing == "rms":
+            data = data / np.sqrt(np.mean(np.square(data)))
+        elif preprocessing == "none":
+            pass  
+        
         detrended_data = signal.detrend(data)
 
         # Determine the number of segments
@@ -39,12 +46,13 @@ def generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, nu
             f, t, Sxx = signal.stft(segment, **spectrogram_setup)
 
             # Convert to decibels for better scaling
-            Sxx_dB = 10 * np.log10(np.abs(Sxx[:382, :]**2) + 1e-8)  # Add epsilon to avoid log(0)
-
+            Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-8)  # Avoid log(0)
+            #Sxx_dB = np.fliplr(abs(Sxx).T).T
+            
             # Plot the spectrogram
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(8, 6))
             im = ax.imshow(Sxx_dB, cmap='jet', aspect='auto', origin='lower',
-                           extent=[t.min(), t.max(), f.min(), f.max()])
+                           extent=[t.min(), t.max(), f.min(), f.max()]) #cmap='jet'
             ax.axis('off')
 
             # Save the spectrogram

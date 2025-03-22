@@ -360,17 +360,20 @@ def kfold_cross_validation(
         # Train the model with validation
         train_acc_list, val_acc_list = train_model(model, train_loader, val_loader, optimizer, num_epochs)
 
+        attention_print = False
+        if fold == 3 : attention_print = True
         # Evaluate on test set
         test_metrics, confusion_mat, all_labels, all_predictions, class_sample_indices = evaluate_model(
-            model, test_loader, class_names, debug, class_sample_indices=class_sample_indices
+            model, test_loader, class_names, debug, class_sample_indices=class_sample_indices, attention_print=attention_print
         )
         fold_metrics.append(test_metrics)
 
         experiment_name = f"{model_type.lower()}_experiment_fold{fold + 1}"
         # Display confusion matrix
+        #if attention_print:
         print_confusion_matrix(confusion_mat, class_names, output_dir="logs", 
-                               experiment_name=experiment_name, all_labels=all_labels, 
-                               all_predictions=all_predictions )
+                            experiment_name=experiment_name, all_labels=all_labels, 
+                            all_predictions=all_predictions )
         results_list.append({
             "Fold": fold + 1,
             "Train Accuracy": train_acc_list[-1],  # Last epoch accuracy
@@ -402,6 +405,85 @@ def kfold_cross_validation(
     }    
     #evaluate_full_model(model,test_loader) - don't use this as it's getting the last kfold weights 
 
+def kfold_validation(
+    model,
+    model_type,
+    train_val_loader,
+    test_loader,
+    num_epochs,
+    lr,
+    class_names=[],
+    n_splits=4,
+    debug=False,
+    patience=5  # 🔧 New: Early stopping patience
+):
+
+    print("Starting K-Fold Validation (with separate test set)...")
+    batch_size = train_val_loader.batch_size
+    dataset = train_val_loader.dataset
+
+    y = [label for _, label in dataset]
+    X = np.arange(len(y))
+
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    splits = skf.split(X, y)
+
+    initial_state = copy.deepcopy(model.state_dict())
+    fold_metrics = []
+    results_list = []
+
+    for fold, (train_idx, val_idx) in enumerate(splits):
+        print(f"\nFold {fold + 1}/{n_splits}")
+
+        train_loader = DataLoader(Subset(dataset, train_idx), batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(Subset(dataset, val_idx), batch_size=batch_size, shuffle=False)
+
+        if debug:
+            analyze_loader_distribution(train_loader, val_loader, class_names, fold)
+
+        model.load_state_dict(copy.deepcopy(initial_state))
+        optimizer = create_optimizer(model, lr)
+
+        train_acc_list, val_acc_list, best_train_acc, best_val_acc = train_model(
+            model, train_loader, val_loader, optimizer, num_epochs,
+            patience=patience  # 🔧 Early stopping enabled
+        )
+
+        #print(f"Fold {fold + 1} Results → Train Acc: {train_acc_list[-1]:.2f}%, Val Acc: {val_acc_list[-1]:.2f}%")
+        print(f"Fold {fold + 1} Results → Best Train Acc: {best_train_acc:.2f}%, Best Val Acc: {best_val_acc:.2f}%")
+
+        results_list.append({
+            "Fold": fold + 1,
+            "Train Accuracy": best_train_acc,
+            "Validation Accuracy": best_val_acc,
+        }), 0
+
+    mean_train_acc = np.mean([r['Train Accuracy'] for r in results_list])
+    mean_val_acc = np.mean([r['Validation Accuracy'] for r in results_list])
+
+    print("\n **Final Cross-Validation Summary (Train/Val)**")
+    print(f"   **Mean Train Accuracy:** {mean_train_acc:.2f}%")
+    print(f"   **Mean Validation Accuracy:** {mean_val_acc:.2f}%")
+
+    print("\n>> Final Evaluation on Independent Test Set")
+    final_metrics, cm, all_labels, all_predictions, _ = evaluate_model(
+        model, test_loader, class_names, debug=debug
+    )
+
+    print_confusion_matrix(cm, class_names, output_dir="logs",
+                           experiment_name=f"{model_type.lower()}_final_test",
+                           all_labels=all_labels,
+                           all_predictions=all_predictions)
+
+    return {
+        **final_metrics,
+        "train_accuracy": mean_train_acc,
+        "validation_accuracy": mean_val_acc,
+        "test_accuracy": final_metrics["accuracy"]
+    }
+
+
+
 def analyze_loader_distribution(train_loader, test_loader, class_names, fold):
     """Analyzes the class distribution in the DataLoaders."""
     for loader_name, loader in zip(["Train", "Test"], [train_loader, test_loader]):
@@ -428,14 +510,17 @@ def create_optimizer(model, lr):
     else:
         raise ValueError("Unsupported model type.")
 
-    return AdamW(params, lr=lr, weight_decay=0.01)
+    return AdamW(params, lr=lr, weight_decay=1e-4)
 
-def train_model(model, train_loader, val_loader, optimizer, num_epochs):
+def train_model(model, train_loader, val_loader, optimizer, num_epochs, patience=5, lr_decay_step=5, lr_decay_factor=0.5):
     """
     Train the model while logging training and validation accuracy.
     """
     criterion = nn.CrossEntropyLoss()
     train_acc_list, val_acc_list = [], []
+
+    best_val_acc = 0.0
+    epochs_no_improve = 0
 
     for epoch in range(num_epochs):
         model.train()
@@ -475,11 +560,22 @@ def train_model(model, train_loader, val_loader, optimizer, num_epochs):
         val_accuracy = 100 * correct_val / total_val
         val_acc_list.append(val_accuracy)
 
+        # Early Stopping
+        if val_accuracy > best_val_acc:
+            best_val_acc = val_accuracy
+            best_train_acc = train_accuracy
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(f"--- Early stopping triggered at epoch {epoch+1} (Best Val Acc: {best_val_acc:.2f}%)")
+                break
+
         print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss:.4f}, Train Acc: {train_accuracy:.2f}%, Val Acc: {val_accuracy:.2f}%")
 
-    return train_acc_list, val_acc_list
+    return train_acc_list, val_acc_list, best_train_acc, best_val_acc
 
-def evaluate_model(model, test_loader, class_names, debug=False, class_sample_indices=None):
+def evaluate_model(model, test_loader, class_names, debug=False, class_sample_indices=None, attention_print=False):
     """Evaluates the model and returns metrics, confusion matrix, labels, and predictions."""
     model.eval()
     all_labels, all_predictions = [], []
@@ -515,22 +611,24 @@ def evaluate_model(model, test_loader, class_names, debug=False, class_sample_in
 
     if debug:
         print("Final Test Evaluation Report:")
-        print(classification_report(all_labels, all_predictions, target_names=class_names))
+        print(classification_report(all_labels, all_predictions, target_names=class_names,zero_division=1))
 
     if hasattr(model, 'vit') or hasattr(model, 'deit') or hasattr(model, 'dinov2') or hasattr(model, 'swinv2') or hasattr(model, 'mae'):
         # Visualize attention for representative samples of each class
-        print("\nVisualizing attention for representative samples:")
+        if attention_print: 
+            print("\nVisualizing attention for representative samples:")
         for class_id, sample_idx in class_sample_indices.items():
             if sample_idx is not None:
-                print(f"Visualizing attention for class '{class_names[class_id]}' at index {sample_idx}...")
-                visualize_attention(
-                    dataset=test_loader.dataset,
-                    model=model,
-                    idx=sample_idx,
-                    attentions=None,  # Let `visualize_attention` compute attentions
-                    head=0,  # First attention head
-                    layer=-1  # Last attention layer
-                )
+                if attention_print:
+                    print(f"Visualizing attention for class '{class_names[class_id]}' at index {sample_idx}...")
+                    visualize_attention(
+                        dataset=test_loader.dataset,
+                        model=model,
+                        idx=sample_idx,
+                        attentions=None,  # Let `visualize_attention` compute attentions
+                        head=0,  # First attention head
+                        layer=-1  # Last attention layer
+                    )
     else:
          print("\nSkipping attention visualization as the model does not support it.")
 

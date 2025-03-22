@@ -1,7 +1,7 @@
-CWRU:
-  dataset_name: "CWRU"
-  bearing_type: "6205"  # DE
-  label: ["N", "I", "O", "B"]
+# CWRU:
+#   dataset_name: "CWRU"
+#   bearing_type: "6205"  # DE
+#   label: ["N", "I", "O", "B"]
 #Hust:
 #  label: ["N", "I", "O", "B"]
 # Paderborn:
