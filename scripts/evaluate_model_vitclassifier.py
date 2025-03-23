@@ -431,6 +431,7 @@ def kfold_validation(
     initial_state = copy.deepcopy(model.state_dict())
     fold_metrics = []
     results_list = []
+    sample_idx = None
 
     for fold, (train_idx, val_idx) in enumerate(splits):
         print(f"\nFold {fold + 1}/{n_splits}")
@@ -446,12 +447,14 @@ def kfold_validation(
 
         train_acc_list, val_acc_list, best_train_acc, best_val_acc = train_model(
             model, train_loader, val_loader, optimizer, num_epochs,
-            patience=patience  # 🔧 Early stopping enabled
+            patience=patience  # Early stopping enabled
         )
 
         #print(f"Fold {fold + 1} Results → Train Acc: {train_acc_list[-1]:.2f}%, Val Acc: {val_acc_list[-1]:.2f}%")
         print(f"Fold {fold + 1} Results → Best Train Acc: {best_train_acc:.2f}%, Best Val Acc: {best_val_acc:.2f}%")
 
+        sample_idx = val_idx[0]
+        
         results_list.append({
             "Fold": fold + 1,
             "Train Accuracy": best_train_acc,
@@ -466,10 +469,14 @@ def kfold_validation(
     print(f"   **Mean Validation Accuracy:** {mean_val_acc:.2f}%")
 
     print("\n>> Final Evaluation on Independent Test Set")
+    attention_print = False
+    
+    if sample_idx is not None:
+        attention_print = True
+    
     final_metrics, cm, all_labels, all_predictions, _ = evaluate_model(
-        model, test_loader, class_names, debug=debug
+        model, test_loader, class_names, debug=debug, sample_idx=sample_idx, attention_print=attention_print 
     )
-
     print_confusion_matrix(cm, class_names, output_dir="logs",
                            experiment_name=f"{model_type.lower()}_final_test",
                            all_labels=all_labels,
@@ -481,8 +488,6 @@ def kfold_validation(
         "validation_accuracy": mean_val_acc,
         "test_accuracy": final_metrics["accuracy"]
     }
-
-
 
 def analyze_loader_distribution(train_loader, test_loader, class_names, fold):
     """Analyzes the class distribution in the DataLoaders."""
@@ -575,16 +580,10 @@ def train_model(model, train_loader, val_loader, optimizer, num_epochs, patience
 
     return train_acc_list, val_acc_list, best_train_acc, best_val_acc
 
-def evaluate_model(model, test_loader, class_names, debug=False, class_sample_indices=None, attention_print=False):
+def evaluate_model(model, test_loader, class_names, debug=False, sample_idx=None, attention_print=False):
     """Evaluates the model and returns metrics, confusion matrix, labels, and predictions."""
     model.eval()
     all_labels, all_predictions = [], []
-    # Initialize class_sample_indices if not provided
-    if class_sample_indices is None:
-        class_sample_indices = {class_name: None for class_name in range(len(class_names))}
-
-    # Track which classes already have a representative sample
-    classes_found = set(class_sample_indices.keys()) if None not in class_sample_indices.values() else set()
 
     with torch.no_grad():
         for idx, (images, labels) in enumerate(test_loader):
@@ -593,14 +592,6 @@ def evaluate_model(model, test_loader, class_names, debug=False, class_sample_in
             _, predictions = torch.max(logits, 1)
             all_labels.extend(labels.cpu().numpy())
             all_predictions.extend(predictions.cpu().numpy())
-
-            # Update representative samples for each class if not already set
-            for i, label in enumerate(labels.cpu().numpy()):
-                if label not in classes_found:
-                    class_sample_indices[label] = idx * test_loader.batch_size + i
-                    classes_found.add(label)
-                    if len(classes_found) == len(class_sample_indices):
-                        break
 
     # Compute metrics
     accuracy = accuracy_score(all_labels, all_predictions) * 100
@@ -614,26 +605,25 @@ def evaluate_model(model, test_loader, class_names, debug=False, class_sample_in
         print(classification_report(all_labels, all_predictions, target_names=class_names,zero_division=1))
 
     if hasattr(model, 'vit') or hasattr(model, 'deit') or hasattr(model, 'dinov2') or hasattr(model, 'swinv2') or hasattr(model, 'mae'):
-        # Visualize attention for representative samples of each class
         if attention_print: 
-            print("\nVisualizing attention for representative samples:")
-        for class_id, sample_idx in class_sample_indices.items():
-            if sample_idx is not None:
-                if attention_print:
-                    print(f"Visualizing attention for class '{class_names[class_id]}' at index {sample_idx}...")
-                    visualize_attention(
-                        dataset=test_loader.dataset,
-                        model=model,
-                        idx=sample_idx,
-                        attentions=None,  # Let `visualize_attention` compute attentions
-                        head=0,  # First attention head
-                        layer=-1  # Last attention layer
-                    )
+            # Visualize attention for representative samples of each class
+            class_sample_indices = pick_representative_indices_by_class(test_loader, num_classes=len(class_names))
+
+            for class_id, sample_idx in class_sample_indices.items():
+                print(f"Class {class_names[class_id]} >> Index {sample_idx}")
+                visualize_attention(
+                    dataset=test_loader.dataset,
+                    model=model,
+                    idx=sample_idx,
+                    attentions=None,
+                    head=0,
+                    layer=-1
+                )
     else:
          print("\nSkipping attention visualization as the model does not support it.")
 
     metrics = {"accuracy": accuracy, "precision": precision, "recall": recall, "f1": f1}
-    return metrics, cm, all_labels, all_predictions, class_sample_indices
+    return metrics, cm, all_labels, all_predictions, None
 
 def summarize_kfold_results(fold_metrics):
     """Summarizes the results across folds."""
@@ -647,6 +637,28 @@ def summarize_kfold_results(fold_metrics):
         print(f"  - Mean {key.capitalize()}: {value:.2f}%")
     
     return mean_metrics
+
+def pick_representative_indices_by_class(test_loader, num_classes=4):
+    """
+    Pick one index per class from test_loader.dataset.
+    Returns: dict {class_id: sample_index}
+    """
+    dataset = test_loader.dataset
+    representative_indices = {}
+
+    for idx in range(len(dataset)):
+        _, label = dataset[idx]
+        label = int(label)
+
+        if label not in representative_indices:
+            representative_indices[label] = idx
+
+        if len(representative_indices) == num_classes:
+            break
+
+    return representative_indices
+
+
  
 def evaluate_full_model(model, test_loader):
     model.eval()

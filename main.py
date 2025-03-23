@@ -20,9 +20,6 @@ os.makedirs("results", exist_ok=True)
 timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 log_filename = f"results/experiment_log_{timestamp}.txt"
 
-# Redirect stdout
-sys.stdout = DualOutput(log_filename)
-
 csv_filename = "results/experiment_results.csv"
 
 # Ensure CSV exists with headers
@@ -115,6 +112,9 @@ def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=
 def run_experimenter(use_domain_split=False, train_domains=None, test_domain=None, preprocessing="none",
                      model_type="CNN2D", pretrain_model=False, base_model=True, perform_kfold=True):
     
+    # Redirect stdout
+    sys.stdout = DualOutput(log_filename)
+    
     start_time = datetime.now()
     
     dataset_name = "UORED"
@@ -177,15 +177,16 @@ def run_experimenter(use_domain_split=False, train_domains=None, test_domain=Non
     df.to_csv(csv_filename, mode='a', header=False, index=False)
     
     print("Experiment results saved to CSV.")
-
+    # Close the log file
+    sys.stdout.flush()
 
 if __name__ == '__main__':
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     print(f">> Start: {timestamp}")
     
     use_domain_split = True  # Toggle domain-based splitting
-    train_domains=["2", "4", "6", "8"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
-    test_domain="10"
+    train_domains=["2", "4", "8", "10"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
+    test_domain="6"
     preprocessing = "rms" # "zscore" (Standardization) "rms" (Root Mean Square) "none"
     model_type="DINOv2"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
     pretrain_model=False # pretrain or use saved 
