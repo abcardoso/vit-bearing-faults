@@ -418,7 +418,7 @@ def kfold_validation(
     patience=5  # 🔧 New: Early stopping patience
 ):
 
-    print("Starting K-Fold Validation (with separate test set)...")
+    print("Starting K-Fold Validation (with separate train+val set)...")
     batch_size = train_val_loader.batch_size
     dataset = train_val_loader.dataset
 
@@ -459,7 +459,7 @@ def kfold_validation(
             "Fold": fold + 1,
             "Train Accuracy": best_train_acc,
             "Validation Accuracy": best_val_acc,
-        }), 0
+        })
 
     mean_train_acc = np.mean([r['Train Accuracy'] for r in results_list])
     mean_val_acc = np.mean([r['Validation Accuracy'] for r in results_list])
@@ -467,8 +467,25 @@ def kfold_validation(
     print("\n **Final Cross-Validation Summary (Train/Val)**")
     print(f"   **Mean Train Accuracy:** {mean_train_acc:.2f}%")
     print(f"   **Mean Validation Accuracy:** {mean_val_acc:.2f}%")
+        
+    # Reset the model to its initial (untrained) state
+    model.load_state_dict(copy.deepcopy(initial_state))
 
-    print("\n>> Final Evaluation on Independent Test Set")
+    # Create a new optimizer for the reset model
+    optimizer = create_optimizer(model, lr)
+
+    # Retrain the model using the full train+val set
+    print("\n>> Final training with full Train+Val set (after all folds):")
+    train_acc_list, _, best_train_acc, _ = train_model(
+        model, train_val_loader, val_loader=None,
+        optimizer=optimizer, num_epochs=15
+    )
+    #train_acc_list, val_acc_list, best_train_acc, best_val_acc
+
+    print(f"Final Train+Val Accuracy (last epoch): {train_acc_list[-1]:.2f}%")
+    print(f"Final Train+Val Accuracy (best): {best_train_acc:.2f}%")
+    
+    print("\n>>> Final Evaluation on Independent Test Set")
     attention_print = False
     
     if sample_idx is not None:
@@ -477,6 +494,11 @@ def kfold_validation(
     final_metrics, cm, all_labels, all_predictions, _ = evaluate_model(
         model, test_loader, class_names, debug=debug, sample_idx=sample_idx, attention_print=attention_print 
     )
+    
+    print("\n*** Final Metrics on Test Set ***")
+    for metric_name, value in final_metrics.items():
+        print(f"{metric_name.capitalize()}: {value:.2f}%")
+    
     print_confusion_matrix(cm, class_names, output_dir="logs",
                            experiment_name=f"{model_type.lower()}_final_test",
                            all_labels=all_labels,
@@ -549,34 +571,39 @@ def train_model(model, train_loader, val_loader, optimizer, num_epochs, patience
         train_accuracy = 100 * correct_train / total_train
         train_acc_list.append(train_accuracy)
 
-        # Validation
-        model.eval()
-        correct_val, total_val = 0, 0
-        with torch.no_grad():
-            for images, labels in val_loader:
-                images, labels = images.to("cuda"), labels.to("cuda")
-                outputs = model(images)
-                if isinstance(outputs, tuple):  #Extract logits if a tuple is returned
-                    outputs = outputs[0]
-                _, predicted = torch.max(outputs, 1)
-                total_val += labels.size(0)
-                correct_val += (predicted == labels).sum().item()
+        if val_loader:
+            # Validation
+            model.eval()
+            correct_val, total_val = 0, 0
+            with torch.no_grad():
+                for images, labels in val_loader:
+                    images, labels = images.to("cuda"), labels.to("cuda")
+                    outputs = model(images)
+                    if isinstance(outputs, tuple):  #Extract logits if a tuple is returned
+                        outputs = outputs[0]
+                    _, predicted = torch.max(outputs, 1)
+                    total_val += labels.size(0)
+                    correct_val += (predicted == labels).sum().item()
 
-        val_accuracy = 100 * correct_val / total_val
-        val_acc_list.append(val_accuracy)
+            val_accuracy = 100 * correct_val / total_val
+            val_acc_list.append(val_accuracy)
 
-        # Early Stopping
-        if val_accuracy > best_val_acc:
-            best_val_acc = val_accuracy
-            best_train_acc = train_accuracy
-            epochs_no_improve = 0
+            # Early Stopping
+            if val_accuracy > best_val_acc:
+                best_val_acc = val_accuracy
+                best_train_acc = train_accuracy
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+                if epochs_no_improve >= patience:
+                    print(f"--- Early stopping triggered at epoch {epoch+1} (Best Val Acc: {best_val_acc:.2f}%)")
+                    break
+
+            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss:.4f}, Train Acc: {train_accuracy:.2f}%, Val Acc: {val_accuracy:.2f}%")
         else:
-            epochs_no_improve += 1
-            if epochs_no_improve >= patience:
-                print(f"--- Early stopping triggered at epoch {epoch+1} (Best Val Acc: {best_val_acc:.2f}%)")
-                break
-
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss:.4f}, Train Acc: {train_accuracy:.2f}%, Val Acc: {val_accuracy:.2f}%")
+            # No validation — just train
+            best_train_acc = train_accuracy
+            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss:.4f}, Train Acc: {train_accuracy:.2f}%")
 
     return train_acc_list, val_acc_list, best_train_acc, best_val_acc
 
@@ -657,8 +684,6 @@ def pick_representative_indices_by_class(test_loader, num_classes=4):
             break
 
     return representative_indices
-
-
  
 def evaluate_full_model(model, test_loader):
     model.eval()

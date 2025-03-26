@@ -20,6 +20,9 @@ os.makedirs("results", exist_ok=True)
 timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 log_filename = f"results/experiment_log_{timestamp}.txt"
 
+# Redirect stdout
+sys.stdout = DualOutput(log_filename)
+
 csv_filename = "results/experiment_results.csv"
 
 # Ensure CSV exists with headers
@@ -92,14 +95,39 @@ def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=
         if dataset_name == "UORED" and use_domain_split:
             for train_domain in train_domains:
                 print(f"Generating spectrograms for Train/Validation domain: {train_domain}")
-                dataset.train_domains = [train_domain]  # Update domain in dataset instance
-                generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments, output_dir=train_output_dir, preprocessing=preprocessing)
+                dataset.train_domains = [train_domain]
+                
+                domain_train_files = dataset.domain_mapping[train_domain]
+                metainfo = [
+                    {"filename": f.replace("-", "_"), "label": f.split("-")[0]}
+                    for f in domain_train_files if not f.startswith("C")
+                ]
+                
+                print(f"[DEBUG] Domain: {train_domain} → {len(metainfo)} files: {[m['filename'] for m in metainfo]}")
+
+                generate_spectrogram(
+                    dataset, metainfo, spectrogram_setup, signal_length, num_segments, 
+                    output_dir=train_output_dir, preprocessing=preprocessing
+                    )
 
             # Generate spectrograms for the test domain separately
             test_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), f"test_domain_{test_domain}")
             print(f"Generating spectrograms for Test domain: {test_domain}")
-            dataset.test_domain = test_domain  # Update dataset instance for test domain
-            generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments, output_dir=test_output_dir, preprocessing=preprocessing )
+            dataset.test_domain = test_domain
+            
+            domain_test_files = dataset.domain_mapping[test_domain]
+            
+            metainfo = [
+                {"filename": f.replace("-", "_"), "label": f.split("-")[0]}
+                for f in domain_test_files if not f.startswith("C")
+            ]
+
+            print(f"[DEBUG] Domain: {test_domain} → {len(metainfo)} files: {[m['filename'] for m in metainfo]}")
+            
+            generate_spectrogram(
+                dataset, metainfo, spectrogram_setup, signal_length, 
+                num_segments, output_dir=test_output_dir, preprocessing=preprocessing 
+                )
         
         else:
             print(f"Generating spectrograms for {dataset_name} (No domain split).")
@@ -112,8 +140,6 @@ def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=
 def run_experimenter(use_domain_split=False, train_domains=None, test_domain=None, preprocessing="none",
                      model_type="CNN2D", pretrain_model=False, base_model=True, perform_kfold=True):
     
-    # Redirect stdout
-    sys.stdout = DualOutput(log_filename)
     
     start_time = datetime.now()
     
@@ -177,22 +203,21 @@ def run_experimenter(use_domain_split=False, train_domains=None, test_domain=Non
     df.to_csv(csv_filename, mode='a', header=False, index=False)
     
     print("Experiment results saved to CSV.")
-    # Close the log file
-    sys.stdout.flush()
+
 
 if __name__ == '__main__':
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     print(f">> Start: {timestamp}")
     
     use_domain_split = True  # Toggle domain-based splitting
-    train_domains=["2", "4", "8", "10"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
-    test_domain="6"
-    preprocessing = "rms" # "zscore" (Standardization) "rms" (Root Mean Square) "none"
-    model_type="DINOv2"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
+    train_domains=["2", "4", "6", "10"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
+    test_domain="8"
+    preprocessing = "zscore" # "zscore" (Standardization) "rms" (Root Mean Square) "none"
+    model_type="DeiT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
     pretrain_model=False # pretrain or use saved 
     base_model=True # base model with no pre-train strategy neither use of weights saved
     perform_kfold=True
-    create_sp = False
+    create_sp = True
     download_raw = False
     
     if download_raw:
@@ -206,6 +231,7 @@ if __name__ == '__main__':
     
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     print(f">> End: {timestamp}")
+
     # Close the log file
     sys.stdout.close()
     sys.stdout = sys.__stdout__  # Reset stdout to the original
