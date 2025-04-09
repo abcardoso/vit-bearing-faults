@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 from collections import defaultdict
 from main import create_spectrograms, run_experimenter  # Import functions from main.py
 
-# Ensure results directory exists ..
+# Ensure results directory exists ...
 os.makedirs("results", exist_ok=True)
 
 # Initialize Experiment Batch Logging
