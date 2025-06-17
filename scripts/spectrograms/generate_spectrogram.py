@@ -52,7 +52,7 @@ def generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length,
             # Plot the spectrogram
             fig, ax = plt.subplots(figsize=(8, 6))
             im = ax.imshow(Sxx_dB, cmap='jet', aspect='auto', origin='lower',
-                           extent=[t.min(), t.max(), f.min(), f.max()]) #cmap='jet'
+                           extent=[t.min(), t.max(), f.min(), f.max()], vmin=-100, vmax=0) #cmap='jet'
             ax.axis('off')
 
             # Save the spectrogram

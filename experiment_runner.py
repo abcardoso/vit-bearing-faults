@@ -13,23 +13,29 @@ os.makedirs("results", exist_ok=True)
 # Initialize Experiment Batch Logging
 timestamp1 = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 # log_filename1 = f"results/experiment_log_batch_{timestamp1}.txt"
-# print(f">> Start Experiment Batch: {timestamp1}")
+print(f">> Start Experiment Batch: {timestamp1}")
 
-# # Define parameter values
+# Define parameter values
 model_types = ["ViT", "DeiT", "DINOv2", "SwinV2", "MAE", "CNN2D"]
-preprocessing_methods = ["rms","zscore", "none"]
-# preprocessing_methods = ["none"]
+# model_types = ["ViT","DINOv2"]
+preprocessing_methods = ["none","zscore", "rms"]
+#preprocessing_methods = ["zscore", "rms"]
+# preprocessing_methods = ["rms"]
+dataset_name = "CWRU"
+num_segments = 20
 train_test_tuples = [
-    (["1", "3", "5", "7"], "9"),
-    (["1", "3", "5", "9"], "7"),
-    (["1", "3", "7", "9"], "5"),
-    (["1", "5", "7", "9"], "3"),
-    (["3", "5", "7", "9"], "1"),
-    (["2", "4", "6", "8"], "10"),
-    (["2", "4", "6", "10"], "8"),
-    (["2", "4", "8", "10"], "6"),
-    (["2", "6", "8", "10"], "4"),
-    (["4", "6", "8", "10"], "2"),
+    # (["1", "2", "3", "4", "5", "6", "7", "8"], "9"),
+    # (["1", "2", "3", "4", "5", "6", "7", "8"], "10"),
+    # (["1", "2", "3", "4", "5", "6", "7", "8"], "11"),
+    # (["1", "2", "3", "4", "5", "6", "7", "8"], "12"),
+    # (["5", "6", "7", "8", "9", "10", "11", "12"], "1"),
+    # (["5", "6", "7", "8", "9", "10", "11", "12"], "2"),
+    # (["5", "6", "7", "8", "9", "10", "11", "12"], "3"),
+    # (["5", "6", "7", "8", "9", "10", "11", "12"], "4"),
+     (["1", "2", "3", "4", "9", "10", "11", "12"], "5"),
+     (["1", "2", "3", "4", "9", "10", "11", "12"], "6"),
+     (["1", "2", "3", "4", "9", "10", "11", "12"], "7"),
+     (["1", "2", "3", "4", "9", "10", "11", "12"], "8"),
 ]
 
 #Experiment Execution Loop
@@ -37,7 +43,8 @@ for train_domains, test_domain in train_test_tuples:
     for preprocessing in preprocessing_methods:
         # Create spectrograms only once per train/test combination
         print(f"📢 Creating spectrograms for Train: {train_domains} | Test: {test_domain} | Preprocessing: {preprocessing}")
-        create_spectrograms(use_domain_split=True, train_domains=train_domains, test_domain=test_domain, preprocessing=preprocessing)
+        create_spectrograms(use_domain_split=True, train_domains=train_domains, 
+                            test_domain=test_domain, preprocessing=preprocessing, target_dataset=dataset_name, num_segments=num_segments)
 
         for model_type in model_types:
             print(f"\n🚀 Running Experiment: Model={model_type}, Preprocessing={preprocessing}, Train={train_domains}, Test={test_domain}")
@@ -45,11 +52,10 @@ for train_domains, test_domain in train_test_tuples:
             run_experimenter(
                 use_domain_split=True, train_domains=train_domains, test_domain=test_domain,
                 preprocessing=preprocessing, model_type=model_type,
-                pretrain_model=False, base_model=True, perform_kfold=True
+                pretrain_model=False, base_model=True, perform_kfold=True, dataset_name=dataset_name
             )
-
-
-# base_path = 'data/spectrograms/uored'
+# base_path = 'data/spectrograms/cwru'
+# print(os.listdir('data/spectrograms/cwru/test_domain_1'))
 
 # def count_images(folder_prefix):
 #     counts = defaultdict(int)
@@ -70,7 +76,6 @@ for train_domains, test_domain in train_test_tuples:
 # print("\nTesting image counts:")
 # for k, v in test_counts.items():
 #     print(f"{k}: {v} images")
-
 
 # End Experiment Batch
 timestamp2 = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")

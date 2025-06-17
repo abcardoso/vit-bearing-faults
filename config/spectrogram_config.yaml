@@ -1,12 +1,12 @@
-# CWRU:
-#   Spectrogram:
-#     nfft: 1024
-#     fs: 48000
-#     nperseg: 512
-#     noverlap: 384
-#     window: 'hann'
-#   Split:
-#     signal_length: 12000
+CWRU:
+  Spectrogram:
+    nfft: 2048
+    fs: 42000
+    nperseg: 1024
+    noverlap: 896
+    window: 'hann'
+  Split:
+    signal_length: 12000
 # Hust:
 #   Spectrogram:
 #     nfft: 1600

@@ -4,7 +4,7 @@ from scripts.copy_spectrogram_to_folds import copy_spectrogram_to_folds
 from src.data_processing.dataset_manager import DatasetManager
 from utils import load_yaml
 from utils.dual_output import DualOutput  # Import the class from dual_output.py
-from experimenter_vitclassifier_kfold import experimenter_classifier, experimenter_classifier_v2
+from experimenter_vitclassifier_kfold import experimenter_classifier_v2
 from run_pretrain import experimenter
 from datasets.uored import UORED
 from datasets.cwru import CWRU
@@ -40,71 +40,87 @@ if not os.path.exists(csv_filename):
 
 
 # DOWNLOAD RAW FILES
-def download():
-    for dataset in ["CWRU", "UORED"]:
-        download_rawfile(dataset)
+def download(dataset_name):
+    #for dataset in ["CWRU", "UORED"]:
+    download_rawfile(dataset_name)
+
+
+def get_metainfo(dataset, domain_files):
+    metainfo = []
+    
+    if hasattr(dataset, "semantic_to_file"):
+        # === CWRU logic ===
+        for semantic in domain_files:
+            if semantic.startswith("C"):
+                continue  # Skip acoustic
+
+            file_id = dataset.semantic_to_file.get(semantic)
+            if file_id:
+                annotation = next((x for x in dataset.annotation_file if x["filename"] == file_id), None)
+                if annotation:
+                    metainfo.append({
+                        "filename": file_id,
+                        "label": annotation["label"]
+                    })
+                else:
+                    print(f"[WARNING] Annotation missing for file_id {file_id}")
+            else:
+                print(f"[WARNING] Mapping missing for semantic name {semantic}")
+    else:
+        # === UORED logic ===
+        for semantic in domain_files:
+            if semantic.startswith("C"):
+                continue
+            file_id = semantic.replace("-", "_")  # Normalize filename
+            label_code = semantic.split("-")[0]
+            metainfo.append({"filename": file_id, "label": label_code})
+
+    return metainfo
 
 # SPECTROGRAMS
-def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=None, preprocessing="none"):
+def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=None, 
+                        preprocessing="none", target_dataset=None, num_segments=20):
 
     # Sets the number of segments
-    num_segments = 20
+    #num_segments = 20
 
     # Load the configuration files
     spectrogram_config = load_yaml('config/spectrogram_config.yaml')
     filter_config = load_yaml('config/filters_config.yaml')
     
-    # Instantiate the data manager
+    dataset_names = (
+        [target_dataset] if target_dataset else spectrogram_config.keys()
+    )
         
-    for dataset_name in spectrogram_config.keys():
+    for dataset_name in dataset_names:
         print(f"Starting the creation of the {dataset_name} spectrograms.")
         filter = filter_config[dataset_name]
-        
-        # Instantiate the dataset class based on dataset_name
+
         if dataset_name == "UORED":
-            if use_domain_split:
-                if not train_domains or not test_domain:
-                    raise ValueError("For UORED with domain split, both `train_domains` and `test_domain` must be specified.")
-                
-                dataset = UORED(use_domain_split=True, train_domains=train_domains, test_domain=test_domain)
-                print(f"Processing UORED with Train/Validation domains {train_domains} and Test domain {test_domain}")
-            else:
-                dataset = UORED(use_domain_split=False)
-                print("Processing UORED without domain splits.")
+            dataset = UORED(use_domain_split=use_domain_split, train_domains=train_domains, test_domain=test_domain)
         elif dataset_name == "CWRU":
-            dataset = CWRU()
-            print("Processing CWRU without domain splits.")
+            dataset = CWRU(use_domain_split=use_domain_split, train_domains=train_domains, test_domain=test_domain)
         else:
             raise ValueError(f"Unknown dataset: {dataset_name}")
 
-
-        # Ensure dataset directory exists
-        dataset_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), "")
+        dataset_output_dir = os.path.join("data/spectrograms", dataset_name.lower())
         os.makedirs(dataset_output_dir, exist_ok=True)
-        
-        data_manager = DatasetManager(dataset_name)
-        metainfo = data_manager.filter_data(filter)
+
         signal_length = spectrogram_config[dataset_name]["Split"]["signal_length"]
         spectrogram_setup = spectrogram_config[dataset_name]["Spectrogram"]
- 
-        train_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), f"train_domains_{'_'.join(train_domains)}")
-        os.makedirs(train_output_dir, exist_ok=True)
-       
-        # Creation of spectrograms    
-        #generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments) 
-        if dataset_name == "UORED" and use_domain_split:
+        
+        if use_domain_split:
+            train_output_dir = os.path.join("data/spectrograms", dataset_name.lower(), f"train_domains_{'_'.join(train_domains)}")
+            os.makedirs(train_output_dir, exist_ok=True)
+            
             for train_domain in train_domains:
                 print(f"Generating spectrograms for Train/Validation domain: {train_domain}")
                 dataset.train_domains = [train_domain]
-                
                 domain_train_files = dataset.domain_mapping[train_domain]
-                metainfo = [
-                    {"filename": f.replace("-", "_"), "label": f.split("-")[0]}
-                    for f in domain_train_files if not f.startswith("C")
-                ]
-                
-                print(f"[DEBUG] Domain: {train_domain} → {len(metainfo)} files: {[m['filename'] for m in metainfo]}")
 
+                metainfo = get_metainfo(dataset, domain_train_files)
+
+                print(f"[DEBUG] Domain: {train_domain} → {len(metainfo)} files: {[m['filename'] for m in metainfo]}")
                 generate_spectrogram(
                     dataset, metainfo, spectrogram_setup, signal_length, num_segments, 
                     output_dir=train_output_dir, preprocessing=preprocessing
@@ -117,10 +133,7 @@ def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=
             
             domain_test_files = dataset.domain_mapping[test_domain]
             
-            metainfo = [
-                {"filename": f.replace("-", "_"), "label": f.split("-")[0]}
-                for f in domain_test_files if not f.startswith("C")
-            ]
+            metainfo = get_metainfo(dataset, domain_test_files)
 
             print(f"[DEBUG] Domain: {test_domain} → {len(metainfo)} files: {[m['filename'] for m in metainfo]}")
             
@@ -131,6 +144,10 @@ def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=
         
         else:
             print(f"Generating spectrograms for {dataset_name} (No domain split).")
+            data_manager = DatasetManager(dataset_name)
+            filter = filter_config[dataset_name]
+            metainfo = data_manager.filter_data(filter)
+            
             generate_spectrogram(dataset, metainfo, spectrogram_setup, signal_length, num_segments,preprocessing=preprocessing)
       
         print(f"Completed spectrogram generation for {dataset_name}; signal_length: {signal_length} ; spectrogram_setup: {spectrogram_setup}; preprocessing {preprocessing}. Directory: {dataset_output_dir} ")
@@ -138,14 +155,10 @@ def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=
                 
 # EXPERIMENTERS
 def run_experimenter(use_domain_split=False, train_domains=None, test_domain=None, preprocessing="none",
-                     model_type="CNN2D", pretrain_model=False, base_model=True, perform_kfold=True):
+                     model_type="CNN2D", pretrain_model=False, base_model=True, perform_kfold=True, dataset_name="CWRU"):
     
     
     start_time = datetime.now()
-    
-    dataset_name = "UORED"
-    first_datasets_name=dataset_name
-    target_datasets_name=dataset_name
         
     experiment_params = {
         "model_type": model_type,
@@ -210,23 +223,25 @@ if __name__ == '__main__':
     print(f">> Start: {timestamp}")
     
     use_domain_split = True  # Toggle domain-based splitting
-    train_domains=["2", "4", "6", "10"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
-    test_domain="8"
-    preprocessing = "zscore" # "zscore" (Standardization) "rms" (Root Mean Square) "none"
+    train_domains=["1", "2", "3", "4", "5", "6", "7", "8"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
+    test_domain="9"
+    preprocessing = "rms" # "zscore" (Standardization) "rms" (Root Mean Square) "none"
     model_type="DeiT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
     pretrain_model=False # pretrain or use saved 
     base_model=True # base model with no pre-train strategy neither use of weights saved
     perform_kfold=True
     create_sp = True
-    download_raw = False
+    download_raw = True
+    dataset_name = "CWRU"
+    num_segments = 20
     
     if download_raw:
-        download()
+        download(dataset_name)
     if create_sp:
-        create_spectrograms(use_domain_split, train_domains, test_domain, preprocessing) 
+        create_spectrograms(use_domain_split, train_domains, test_domain, preprocessing, dataset_name, num_segments) 
     
     run_experimenter(use_domain_split, train_domains, test_domain, preprocessing,
-                     model_type, pretrain_model, base_model, perform_kfold)
+                     model_type, pretrain_model, base_model, perform_kfold, dataset_name)
     
     
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")

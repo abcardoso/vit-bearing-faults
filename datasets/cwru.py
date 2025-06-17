@@ -3,6 +3,7 @@ import re
 import scipy.io
 import numpy as np
 from datasets.base_dataset import BaseDataset
+from torchvision.datasets import ImageFolder
 
 class CWRU(BaseDataset):    
 
@@ -12,7 +13,7 @@ class CWRU(BaseDataset):
             A list of tuples containing filenames (for naming downloaded files) and URL suffixes 
             for downloading vibration data.
         """
-        return [
+        all_bearings = [
         ("97", "97.mat"),   ("98", "98.mat"),   ("99", "99.mat"),   ("100", "100.mat"), ("105", "105.mat"), 
         ("106", "106.mat"), ("107", "107.mat"), ("108", "108.mat"), ("109", "109.mat"), ("110", "110.mat"), 
         ("111", "111.mat"), ("112", "112.mat"), ("118", "118.mat"), ("119", "119.mat"), ("120", "120.mat"), 
@@ -47,16 +48,149 @@ class CWRU(BaseDataset):
         ("3003", "3003.mat"), ("3004", "3004.mat"), ("3005", "3005.mat"), ("3006", "3006.mat"), ("3007", "3007.mat"), 
         ("3008", "3008.mat")
         ]
+        
+        if self.use_domain_split:
+            selected_files = set()
+            for domain in self.train_domains + [self.test_domain]:
+                semantic_names = self.domain_mapping.get(domain, [])
+                for name in semantic_names:
+                    mapped = self.semantic_to_file.get(name)
+                    if mapped:
+                        selected_files.add(mapped)
+                    else:
+                        print(f"[WARNING] No mapping found for {name}")
+            return [b for b in all_bearings if b[0] in selected_files]
 
-    def __init__(self):
+        return all_bearings
+
+    def __init__(self, use_domain_split=True, train_domains=None, test_domain=None):
 
         super().__init__(rawfilesdir = "data/raw/cwru",
                          url = "https://engineering.case.edu/sites/default/files/")
+        
+        self.use_domain_split = use_domain_split
+        self.train_domains = train_domains if train_domains else []
+        self.test_domain = test_domain if test_domain else ""
 
+        # Define domain mapping (based on your Table 2 CWRU 48k DE split)
+        self.domain_mapping = {
+            "1": ["Normal_0", "IR007_0", "OR007@6_0", "B007_0"],
+            "2": ["Normal_1", "IR007_1", "OR007@6_1", "B007_1"],
+            "3": ["Normal_2", "IR007_2", "OR007@6_2", "B007_2"],
+            "4": ["Normal_3", "IR007_3", "OR014@6_3", "B007_3"],
+            "5": ["Normal_0", "IR014_0", "OR014@6_0", "B014_0"],
+            "6": ["Normal_1", "IR014_1", "OR014@6_1", "B014_1"],
+            "7": ["Normal_2", "IR014_2", "OR014@6_2", "B014_2"],
+            "8": ["Normal_3", "IR014_3", "OR014@6_3", "B014_3"],
+            "9": ["Normal_0", "IR021_0", "OR021@6_0", "B021_0"],
+            "10": ["Normal_1", "IR021_1", "OR021@6_1", "B021_1"],
+            "11": ["Normal_2", "IR021_2", "OR021@6_2", "B021_2"],
+            "12": ["Normal_3", "IR021_3", "OR021@6_3", "B021_3"]
+        }
+        self.semantic_to_file = {
+            # Domain 1
+            "Normal_0": "97",
+            "IR007_0": "105",
+            "OR007@6_0": "118",
+            "B007_0": "130",
 
-    def get_domain_folder(self, label):
-        return ""  # No default folder; use dataset root path
+            # Domain 2
+            "Normal_1": "98",
+            "IR007_1": "106",
+            "OR007@6_1": "119",
+            "B007_1": "131",
 
+            # Domain 3
+            "Normal_2": "99",
+            "IR007_2": "107",
+            "OR007@6_2": "120",
+            "B007_2": "132",
+
+            # Domain 4
+            "Normal_3": "100",
+            "IR007_3": "108",
+            "OR014@6_3": "121",
+            "B007_3": "133",
+
+            # Domain 5
+            "IR014_0": "109",
+            "OR014@6_0": "122",
+            "B014_0": "135",
+
+            # Domain 6
+            "IR014_1": "110",
+            "OR014@6_1": "123",
+            "B014_1": "136",
+
+            # Domain 7
+            "IR014_2": "111",
+            "OR014@6_2": "124",
+            "B014_2": "137",
+
+            # Domain 8
+            "IR014_3": "112",
+            "OR014@6_3": "125",
+            "B014_3": "138",
+
+            # Domain 9
+            "IR021_0": "144",
+            "OR021@6_0": "145",
+            "B021_0": "146",
+
+            # Domain 10
+            "IR021_1": "147",
+            "OR021@6_1": "148",
+            "B021_1": "149",
+
+            # Domain 11
+            "IR021_2": "150",
+            "OR021@6_2": "151",
+            "B021_2": "156",
+
+            # Domain 12
+            "IR021_3": "158",
+            "OR021@6_3": "159",
+            "B021_3": "160",
+        }
+
+        if self.use_domain_split:
+            print(f">> CWRU Initialized | Train Domains: {self.train_domains} | Test Domain: {self.test_domain}")
+        else:
+            print(f">> CWRU Initialized in **Non-Split Mode** (Entire Dataset Used)")
+
+    def get_data_by_domain(self, domain):
+        """
+        Retrieves data for a specific domain.
+        """
+        if self.use_domain_split:
+            if domain in self.train_domains:
+                print(f"Loading ***Training/Validation*** data for domain {domain}")
+            elif domain == self.test_domain:
+                print(f"Loading ***Test*** data for domain {domain}")
+            else:
+                raise ValueError(f"Domain {domain} is not configured for this dataset.")
+        else:
+            print(f"Loading **Full CWRU Dataset (No domain split)**")
+
+        return self.load_data_from_directory(domain)
+    
+    def get_domain_folder(self, is_test=False):
+        if self.use_domain_split:
+            if is_test:
+                return f"test_domain_{self.test_domain}"
+            return f"train_domains_{'_'.join(self.train_domains)}"
+        return ""
+
+    def load_data_from_directory(self, domain):
+        """
+        Load spectrograms from the corresponding domain directory.
+        """
+        domain_path = os.path.join("data/spectrograms/cwru", domain)
+        if not os.path.exists(domain_path):
+            raise FileNotFoundError(f"Missing spectrogram directory: {domain_path}")
+
+        print(f"Loading spectrograms from {domain_path}")
+        return ImageFolder(domain_path)
 
     def _extract_data(self, filepath):
         """ Extracts data from a .mat file for bearing fault analysis.
@@ -72,6 +206,10 @@ class CWRU(BaseDataset):
             '6205': 'DE' }
         basename = os.path.basename(filepath).split('.')[0]
         annot_info = list(filter(lambda x: x["filename"]==basename, self.annotation_file))[0]
+        
+        if annot_info is None:
+            raise ValueError(f"No annotation found for {basename}")
+        
         label = annot_info["label"]
         bearing_type = annot_info["bearing_type"]
         bearing_position = ['DE'] if label == 'N' else [map_position[bearing_type]]

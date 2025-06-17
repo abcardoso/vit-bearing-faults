@@ -1,20 +1,45 @@
 import torch
 import os
 import copy
+import sys
+import logging
+from collections import Counter
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, ConcatDataset, Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier, MAEClassifier #, DeepSeekVL2Classifier 
 from src.models.vitclassifier import train_and_save, load_trained_model
-from scripts.evaluate_model_vitclassifier import kfold_cross_validation, kfold_validation, resubstitution_test, one_fold_with_bias, one_fold_without_bias, evaluate_full_model
+from scripts.evaluate_model_vitclassifier import kfold_validation, resubstitution_test, one_fold_with_bias, one_fold_without_bias, evaluate_full_model
 from datasets.uored import UORED
 from datasets.cwru import CWRU
-
-import sys
-import logging
+from imblearn.over_sampling import SMOTE
+from torch.utils.data import TensorDataset
 from utils.logginout import LoggerWriter
 from utils.print_info import print_info
+
+
+def apply_smote_to_imagefolder(imagefolder_dataset):
+    """
+    Applies SMOTE to an ImageFolder dataset by flattening image tensors.
+    Returns a new TensorDataset with balanced samples.
+    """
+    images = []
+    labels = []
+
+    for img, label in imagefolder_dataset:
+        images.append(img.view(-1).numpy())  # Flatten image
+        labels.append(label)
+
+    smote = SMOTE()
+    X_res, y_res = smote.fit_resample(np.array(images), np.array(labels))
+
+    # Reshape back to image tensors (assumes original size 3x224x224)
+    X_res_tensors = torch.tensor(X_res).float().view(-1, 3, 224, 224)
+    y_res_tensors = torch.tensor(y_res).long()
+
+    print(f"[INFO] Applied SMOTE: Original={len(images)}, After={len(X_res)}")
+    return TensorDataset(X_res_tensors, y_res_tensors)
 
 def compute_and_print_distribution(loader, class_to_idx, dataset_name):
     """
@@ -38,7 +63,7 @@ def compute_and_print_distribution(loader, class_to_idx, dataset_name):
 
     return distribution
 
-def enforce_consistent_mapping(datasets, desired_class_to_idx):
+def enforce_consistent_mapping(datasets: list[ImageFolder], desired_class_to_idx: dict):
     """
     Ensures that all datasets have the same class-to-index mapping.
     Args:
@@ -69,231 +94,13 @@ def enforce_consistent_mapping(datasets, desired_class_to_idx):
         # Update dataset with only valid samples
         dataset.samples = valid_samples
         dataset.class_to_idx = desired_class_to_idx
-        dataset.classes = list(desired_class_to_idx.keys())
+        dataset.classes = sorted(desired_class_to_idx, key=desired_class_to_idx.get)
+        #dataset.classes = list(desired_class_to_idx.keys())
+        print(f"[INFO] Dataset updated: {len(valid_samples)} samples retained for consistent classes.")
+        print(f"[INFO] Labels in dataset after mapping: {Counter([label for _, label in dataset.samples])}")
+
 
     print("[INFO] Mappings enforced successfully.")
-
-def experimenter_classifier(
-    model_type="DeiT",  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "DeepSeekVL2", "MAE", "CNN2D", "ResNet18"
-    pretrain_model=False,
-    base_model=True,
-    num_classes=4,
-    num_epochs=20,
-    lr=0.00005,
-    num_epochs_kf=10,
-    lr_kf=0.00005,
-    batch_size=32,
-    root_dir="data/spectrograms",
-    first_datasets_name=["CWRU"],
-    target_datasets_name=["UORED"],
-    perform_kfold=True,
-    mode="supervised",  # "pretrain", "supervised", or "both"
-    use_domain_split=False,
-    train_domains=None,
-    test_domain=None
-):
-    print(f"Experiment Parameters: {locals()}")
-    
-    # Map model_type to corresponding class
-    model_classes = {
-        "ViT": ViTClassifier,
-        "DeiT": DeiTClassifier,
-        "DINOv2": DINOv2WithRegistersClassifier,
-        "SwinV2": SwinV2Classifier,
-        "MAE": MAEClassifier,
-        "CNN2D": CNN2D,
-        "ResNet18": ResNet18
-        #,"DeepSeekVL2": DeepSeekVL2Classifier
-    }
-
-    if model_type not in model_classes:
-        raise ValueError(f"Unsupported model type: {model_type}. Choose from {list(model_classes.keys())}.")
-
-    # Initialize the model
-    model_class = model_classes[model_type]
-    model = model_class(num_classes=num_classes).to("cuda")
-
-    # Class-to-index mapping
-    class_to_idx = {"B": 0, "I": 1, "N": 2, "O": 3}
-
-    # Define transforms
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-
-    datasets = []
-    for ds_name in first_datasets_name + target_datasets_name:
-        if ds_name == "UORED":
-            if use_domain_split:
-                if not train_domains or not test_domain:
-                    raise ValueError("For UORED with domain split, both `train_domains` and `test_domain` must be specified.")
-                dataset_instance = UORED(use_domain_split=True, train_domains=train_domains, test_domain=test_domain)
-                print(f"Processing UORED with Train/Validation domains {train_domains} and Test domain {test_domain}")
-            else:
-                dataset_instance = UORED(use_domain_split=False)  # Full dataset, no domain split
-                print("Processing UORED without domain splits.")        
-        elif ds_name == "CWRU":
-            dataset_instance = CWRU()
-            print("Processing CWRU without domain splits.")
-        else:
-            raise ValueError(f"Unknown dataset: {ds_name}")
-
-        # **Determine dataset paths**
-        dataset_path = os.path.join(root_dir, ds_name.lower())
-        
-        if use_domain_split and ds_name == "UORED":
-            dataset_path = os.path.join(dataset_path, f"train_domains_{'_'.join(train_domains)}")
-
-        if not os.path.exists(dataset_path) or not os.listdir(dataset_path):
-            raise FileNotFoundError(f"Error: The dataset folder {dataset_path} is missing or empty! Ensure spectrograms are generated correctly.")
-
-        print(f"[DEBUG] Final dataset path for ImageFolder: {dataset_path}")
-
-        dataset = ImageFolder(dataset_path, transform=transform)
-        datasets.append(dataset)
-        
-    # Load train and test datasets
-    first_datasets = []
-    target_datasets = []
-
-    for ds_name in first_datasets_name:
-        dataset_path = os.path.join(root_dir, ds_name.lower())
-
-        if ds_name == "UORED" and use_domain_split:
-            dataset_path = os.path.join(dataset_path, f"train_domains_{'_'.join(train_domains)}")
-
-        print(f"[DEBUG] Loading First Dataset from: {dataset_path}")
-        first_datasets.append(ImageFolder(dataset_path, transform))
-
-    for ds_name in target_datasets_name:
-        dataset_path = os.path.join(root_dir, ds_name.lower())
-
-        if ds_name == "UORED" and use_domain_split:
-            dataset_path = os.path.join(dataset_path, f"test_domain_{test_domain}")
-
-        print(f"[DEBUG] Loading Target Dataset from: {dataset_path}")
-        target_datasets.append(ImageFolder(dataset_path, transform))
-        
-    # Enforce consistent mapping
-    enforce_consistent_mapping(first_datasets, class_to_idx)
-    enforce_consistent_mapping(target_datasets, class_to_idx)
-
-    # Combine datasets
-    first_concated_dataset = ConcatDataset(first_datasets)
-    target_concated_dataset = ConcatDataset(target_datasets)
-
-    # Split train data for k-fold
-    train_idx, eval_idx = train_test_split(
-        range(len(first_concated_dataset)),
-        test_size=0.2,
-        stratify=[y for _, y in first_concated_dataset]
-    )
-
-    # Create DataLoaders
-    first_train_loader = DataLoader(
-        torch.utils.data.Subset(first_concated_dataset, train_idx),
-        batch_size=batch_size, shuffle=True, num_workers=4
-    )
-    first_eval_loader = DataLoader(
-        torch.utils.data.Subset(first_concated_dataset, eval_idx),
-        batch_size=batch_size, shuffle=False, num_workers=4
-    )
-    target_loader = DataLoader(target_concated_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    first_full_loader = DataLoader(first_concated_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-
-    # Compute and print class distributions
-    for dataset_name, dataset_loader in zip(first_datasets_name, [first_train_loader]):
-        print(f"\n>> Calculating distribution for first dataset (if used) ({dataset_name})...")
-        compute_and_print_distribution(dataset_loader, class_to_idx, dataset_name)
-
-    for dataset_name, dataset_loader in zip(target_datasets_name, [target_loader]):
-        print(f"\n>> Calculating distribution for target dataset (TARGET dataset) ({dataset_name})...")
-        compute_and_print_distribution(dataset_loader, class_to_idx, dataset_name)
-
-    # Define model save path
-    saved_model_path = f"saved_models/{model_type.lower()}_classifier.pth"
-    print_info("Experiment", [f"*** Experiment with {model_type}Classifier"])
-    if not base_model:
-        print(f"Saved model path: {saved_model_path}")
-
-    # Pre-train or load model
-    if not base_model:
-        if pretrain_model:
-            print("First approach - training the model.")
-            teacher_model = None
-            # Check if the pretrained checkpoint exists
-            pretrained_checkpoint = saved_model_path.replace(".pth", "_pretrained.pth")
-            if mode == "pretrain":
-                teacher_model = model_class(num_classes=num_classes).to("cuda")
-
-            # Initialize or load the model
-            if not os.path.exists(pretrained_checkpoint):
-                print(f"No pretrained checkpoint found. Initializing new model for pretraining: {model_type}Classifier")
-                model = model_class(num_classes=num_classes).to("cuda")
-            else:
-                print(f"Loading pretrained checkpoint from {pretrained_checkpoint}")
-                model = load_trained_model(model_class, pretrained_checkpoint, num_classes=num_classes, pretrained=True)
-
-            train_and_save(model, 
-                           first_full_loader, #first_train_loader,  
-                           first_eval_loader, #not used
-                           num_epochs, lr, saved_model_path,mode=mode, 
-                           pretrain_epochs=num_epochs,teacher_model=teacher_model, 
-                           datasets_name = first_datasets_name)
-        else:
-            print("Loading pre-trained model.")
-            model = load_trained_model(model_class, saved_model_path, 
-                                       num_classes=num_classes, pretrained=pretrain_model).to("cuda")
-    else:
-        print(f"Using base model {model_type}Classifier with no pre-training.")
-
-    # Run k-fold cross-validation
-    group_by = ""  # Modify this if needed
-    #print("Starting k-fold cross-validation...")
-    # Evaluating the model
-    
-    # resubstitution_test(
-    #     model,
-    #     ds_test_loader,
-    #     num_epochs,
-    #     lr,
-    #     class_names = list(class_to_idx.keys())
-    # )
-    
-    # one_fold_with_bias(
-    #     model,
-    #     ds_test_loader,
-    #     num_epochs,
-    #     lr,
-    #     class_names = list(class_to_idx.keys())
-    # )
-    
-    # one_fold_without_bias(
-    #     model,
-    #     ds_test_loader,
-    #     num_epochs,
-    #     lr,
-    #     class_names = list(class_to_idx.keys())
-    # )
-    
-    metrics = kfold_cross_validation(
-        model,
-        model_type,  
-        first_eval_loader if set(target_datasets_name) == set(first_datasets_name) else target_loader,
-        num_epochs = num_epochs_kf,
-        lr = lr_kf, 
-        group_by="", 
-        class_names = list(class_to_idx.keys()), 
-        n_splits=4,
-        perform_kfold=perform_kfold,  # New parameter to toggle K-Fold Cross-Validation
-        debug=True,
-        datasets_name=target_datasets_name, #first_datasets_name
-        train_domains=train_domains,  # Multiple domains for Train/Validation
-        test_domain=test_domain  # Single domain for Test
-    )
-    return metrics
     
 def experimenter_classifier_v2(
     model_type="DeiT",
@@ -342,30 +149,33 @@ def experimenter_classifier_v2(
     ])
 
     # === Path handling ===
-    if dataset_name == "UORED":
-        if use_domain_split:
-            if not train_domains or not test_domain:
-                raise ValueError("train_domains and test_domain must be specified for domain split.")
-            train_path = os.path.join(root_dir, "uored", f"train_domains_{'_'.join(train_domains)}")
-            test_path = os.path.join(root_dir, "uored", f"test_domain_{test_domain}")
-        else:
-            train_path = os.path.join(root_dir, "uored")
-            test_path = train_path
-    elif dataset_name == "CWRU":
-        train_path = test_path = os.path.join(root_dir, "cwru")
-    else:
+    dataset_classes = {"UORED": UORED, "CWRU": CWRU}
+    if dataset_name not in dataset_classes:
         raise ValueError(f"Unsupported dataset: {dataset_name}")
+
+    dataset_obj = dataset_classes[dataset_name](
+        use_domain_split=use_domain_split,
+        train_domains=train_domains,
+        test_domain=test_domain
+    )
+
+    train_subdir = dataset_obj.get_domain_folder(is_test=False)
+    test_subdir = dataset_obj.get_domain_folder(is_test=True)
+    train_path = os.path.join(root_dir, dataset_name.lower(), train_subdir)
+    test_path = os.path.join(root_dir, dataset_name.lower(), test_subdir)
 
     if not os.path.exists(train_path):
         raise FileNotFoundError(f"Missing training path: {train_path}")
     if not os.path.exists(test_path):
         raise FileNotFoundError(f"Missing test path: {test_path}")
 
-    # === Load datasets ===
     full_train_dataset = ImageFolder(train_path, transform=transform)
     test_dataset = ImageFolder(test_path, transform=transform)
 
     enforce_consistent_mapping([full_train_dataset, test_dataset], class_to_idx)
+    
+    print("[DEBUG] Final label distribution in test_dataset:")
+    print(Counter([label for _, label in test_dataset.samples]))
 
     train_val_loader = DataLoader(full_train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -394,10 +204,8 @@ def experimenter_classifier_v2(
     return metrics
 
 
-
-
 def run_experimenter():     
-    experimenter_classifier(
+    experimenter_classifier_v2(
         model_type="ViT",  
         pretrain_model=False,
         base_model=True,
@@ -406,14 +214,11 @@ def run_experimenter():
         lr=0.00005,
         batch_size=32,
         root_dir="data/spectrograms",
-        first_datasets_name=["CWRU"],
-        target_datasets_name=["UORED"],
+        dataset_name="UORED",
         perform_kfold=True,
         mode="supervised",  # "pretrain", "supervised", or "both"
         use_domain_split= False,
         domain_name= None
-
-    
     )
 
 if __name__ == "__main__":

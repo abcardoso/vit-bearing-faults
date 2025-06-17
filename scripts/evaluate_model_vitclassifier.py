@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 import csv
+from collections import Counter
 from torchvision.datasets import ImageFolder
 from mpl_toolkits.mplot3d import Axes3D
 from datetime import datetime
@@ -280,131 +281,6 @@ def load_datasets(root_dir, first_datasets_name, target_datasets_name, use_domai
 
     return train_datasets, val_datasets, test_dataset
     
-def kfold_cross_validation(
-    model,
-    model_type,
-    test_loader,
-    num_epochs,
-    lr,
-    group_by="",
-    class_names=[],
-    n_splits=4,
-    perform_kfold=True, 
-    debug=False,
-    datasets_name=None,
-    train_domains=None,  # Multiple domains for Train/Validation
-    test_domain=None  # Single domain for Test
-):
-    datasets_str = ", ".join(datasets_name) if datasets_name else "Unknown Dataset"
-   
-    batch_size = test_loader.batch_size
-    dataset = test_loader.dataset
-
-    if not perform_kfold:
-        # Direct evaluation mode
-        print(f"Performing direct evaluation of: {datasets_str}")
-        evaluate_model(model, test_loader, class_names, debug=debug)
-        return
-
-    # K-Fold Cross-Validation mode
-    y = [label for _, label in dataset]  # Extract labels
-    X = np.arange(len(y))  # Indices as features
-
-    # Determine cross-validation strategy
-    if group_by:
-        groups = grouperf(dataset, group_by)
-        skf = StratifiedGroupKFold(n_splits=n_splits)
-        split = skf.split(X, y, groups)
-    else:
-        if debug:
-            print("Group by: None")
-        skf = StratifiedKFold(n_splits=n_splits)
-        split = skf.split(X, y)
-
-    # Save initial model state
-    initial_state = copy.deepcopy(model.state_dict())
-    fold_metrics = []
-    results_list = []
-
-    print(f"Learning Rate: {lr}")
-    #print(f"Starting K-Fold Cross-Validation... Model: {model_type.lower()}")
-    print(f"Starting K-Fold Cross-Validation of: {datasets_str}")
-    
-    # Initialize class_sample_indices before K-Fold
-    class_sample_indices = None
-
-    for fold, (train_idx, test_idx) in enumerate(split):
-        print(f"\nFold {fold + 1}/{n_splits}")
-
-        if len(train_idx) == 0 or len(test_idx) == 0:
-            print(f"Skipping Fold {fold + 1}: Empty train or test set.")
-            continue
-        
-        # **Split train into train and validation (80-20)**
-        train_idx, val_idx = train_test_split(
-            train_idx, test_size=0.2, stratify=[y[i] for i in train_idx], random_state=42
-        )
-
-        # Prepare DataLoaders
-        train_loader = DataLoader(Subset(dataset, train_idx), batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(Subset(dataset, val_idx), batch_size=batch_size, shuffle=False)
-        test_loader = DataLoader(Subset(dataset, test_idx), batch_size=batch_size, shuffle=False)
-
-        if debug:
-            analyze_loader_distribution(train_loader, test_loader, class_names, fold)
-
-        # Reset model and optimizer
-        model.load_state_dict(copy.deepcopy(initial_state))
-        optimizer = create_optimizer(model, lr)
-        
-        # Train the model with validation
-        train_acc_list, val_acc_list = train_model(model, train_loader, val_loader, optimizer, num_epochs)
-
-        attention_print = False
-        if fold == 3 : attention_print = True
-        # Evaluate on test set
-        test_metrics, confusion_mat, all_labels, all_predictions, class_sample_indices = evaluate_model(
-            model, test_loader, class_names, debug, class_sample_indices=class_sample_indices, attention_print=attention_print
-        )
-        fold_metrics.append(test_metrics)
-
-        experiment_name = f"{model_type.lower()}_experiment_fold{fold + 1}"
-        # Display confusion matrix
-        #if attention_print:
-        print_confusion_matrix(confusion_mat, class_names, output_dir="logs", 
-                            experiment_name=experiment_name, all_labels=all_labels, 
-                            all_predictions=all_predictions )
-        results_list.append({
-            "Fold": fold + 1,
-            "Train Accuracy": train_acc_list[-1],  # Last epoch accuracy
-            "Validation Accuracy": val_acc_list[-1],  # Last epoch validation accuracy
-            "Test Accuracy": test_metrics["accuracy"],
-        })
-
-
-    # Summarize results across folds
-    mean_metrics = summarize_kfold_results(fold_metrics)
-
-    # Compute Mean Accuracies for CSV
-    mean_train_acc = np.mean([r['Train Accuracy'] for r in results_list])
-    mean_val_acc = np.mean([r['Validation Accuracy'] for r in results_list])
-    mean_test_acc = mean_metrics["accuracy"]
-
-    # Print final summary
-    print("\n **Final K-Fold Cross-Validation Summary**")
-    print(f"   **Mean Train Accuracy:** {mean_train_acc:.2f}%")
-    print(f"   **Mean Validation Accuracy:** {mean_val_acc:.2f}%")
-    print(f"   **Mean Test Accuracy:** {mean_test_acc:.2f}%")
-    
-    # Return values to be saved in CSV
-    return {
-        **mean_metrics,
-        "train_accuracy": mean_train_acc,
-        "validation_accuracy": mean_val_acc,
-        "test_accuracy": mean_test_acc      
-    }    
-    #evaluate_full_model(model,test_loader) - don't use this as it's getting the last kfold weights 
-
 def kfold_validation(
     model,
     model_type,
@@ -415,7 +291,7 @@ def kfold_validation(
     class_names=[],
     n_splits=4,
     debug=False,
-    patience=5  # 🔧 New: Early stopping patience
+    patience=5  
 ):
 
     print("Starting K-Fold Validation (with separate train+val set)...")
@@ -620,6 +496,9 @@ def evaluate_model(model, test_loader, class_names, debug=False, sample_idx=None
             all_labels.extend(labels.cpu().numpy())
             all_predictions.extend(predictions.cpu().numpy())
 
+    print("Train class distribution:", Counter(all_labels))
+    print("Test class distribution:", Counter(all_predictions))
+    
     # Compute metrics
     accuracy = accuracy_score(all_labels, all_predictions) * 100
     precision = precision_score(all_labels, all_predictions, average="weighted") * 100
@@ -629,7 +508,18 @@ def evaluate_model(model, test_loader, class_names, debug=False, sample_idx=None
 
     if debug:
         print("Final Test Evaluation Report:")
-        print(classification_report(all_labels, all_predictions, target_names=class_names,zero_division=1))
+        
+        label_indices = [0, 1, 2, 3]  # B, I, N, O
+        #target_names = ["B", "I", "N", "O"]
+
+        print(classification_report(
+            all_labels, 
+            all_predictions, 
+            labels=label_indices,
+            target_names=class_names,
+            zero_division=1
+        ))
+        #print(classification_report(all_labels, all_predictions, target_names=class_names,zero_division=1))
 
     if hasattr(model, 'vit') or hasattr(model, 'deit') or hasattr(model, 'dinov2') or hasattr(model, 'swinv2') or hasattr(model, 'mae'):
         if attention_print: 
@@ -764,16 +654,16 @@ def visualize_attention(dataset, model, idx, attentions, head=0, layer=-1):
     # attention_resized = (attention_resized - attention_resized.min()) / (attention_resized.max() - attention_resized.min())
 
     # Convert spectrogram to numpy for visualization
-    spectrogram_np = np.asarray(spectrogram).astype(float)
-    if spectrogram_np.shape[0] == 3:  # Check if it's an RGB image
-        spectrogram_np = np.transpose(spectrogram_np, (1, 2, 0))  # Convert to HWC format
+    sp_np = np.asarray(spectrogram).astype(float)
+    if sp_np.shape[0] == 3:  # Check if it's an RGB image
+        sp_np = np.transpose(sp_np, (1, 2, 0))  # Convert to HWC format
 
     vmin = np.percentile(attention_resized, 5)
     vmax = np.percentile(attention_resized, 95)
     
     # Normalize spectrogram data to [0, 1]
-    if spectrogram_np.max() > 1.0:
-        spectrogram_np = (spectrogram_np - spectrogram_np.min()) / (spectrogram_np.max() - spectrogram_np.min())
+    if sp_np.max() > 1.0:
+        sp_np = (sp_np - sp_np.min()) / (sp_np.max() - sp_np.min())
     
     # print("Spectrogram min and max:", spectrogram_np.min(), spectrogram_np.max())
     # print("Attention map min and max:", attention_resized.min(), attention_resized.max())
@@ -783,7 +673,7 @@ def visualize_attention(dataset, model, idx, attentions, head=0, layer=-1):
     fig.suptitle(f"Attention Visualization for Sample {idx} - Class: {class_name} - Label: {label}", fontsize=16)
 
     # Spectrogram
-    spectrogram_im = axs[0].imshow(spectrogram_np, cmap="jet", aspect='auto', origin='lower') # Force auto aspect ratio
+    spectrogram_im = axs[0].imshow(sp_np, cmap="jet", aspect='auto', origin='lower',vmin=-100, vmax=0) # Force auto aspect ratio
     #axs[0].imshow(attention_resized, cmap="plasma", alpha=0.5, aspect="auto") #Overlay attention on spectrogram
     axs[0].set_title("Original Spectrogram", fontsize=14)
     axs[0].set_ylabel("Frequency (Hz)", fontsize=12)
