@@ -49,6 +49,14 @@ class CWRU(BaseDataset):
         ("3008", "3008.mat")
         ]
         
+        # If not using domain split, just return all files.
+        if not self.use_domain_split:
+            return all_bearings
+
+        # Defensive check for empty/null train_domains or test_domain
+        if not self.train_domains or not self.test_domain:
+            return all_bearings
+        
         if self.use_domain_split:
             selected_files = set()
             for domain in self.train_domains + [self.test_domain]:

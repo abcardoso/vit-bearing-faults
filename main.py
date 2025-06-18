@@ -30,9 +30,9 @@ if not os.path.exists(csv_filename):
     pd.DataFrame(columns=[
         "model_type", "pretrain_model", "base_model", "num_classes",
         "num_epochs", "lr", "num_epochs_kf", "lr_kf", "batch_size", "rootdir",
-        "dataset_name", "perform_kfold",
+        "dataset_name", "perform_kfold", 
         "mode", "use_domain_split", "train_domains", "test_domain",
-        "start", "endtime", "time_spent",  # Added time_spent column
+        "num_segments", "use_SMOTE", "start", "endtime", "time_spent",  # Added time_spent column
         "accuracy", "precision", "recall", "f1_score",
         "train_accuracy", "validation_accuracy", "test_accuracy",
         "log_file", "preprocessing"
@@ -155,7 +155,8 @@ def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=
                 
 # EXPERIMENTERS
 def run_experimenter(use_domain_split=False, train_domains=None, test_domain=None, preprocessing="none",
-                     model_type="CNN2D", pretrain_model=False, base_model=True, perform_kfold=True, dataset_name="CWRU"):
+                     model_type="CNN2D", pretrain_model=False, base_model=True, perform_kfold=True, dataset_name="CWRU", 
+                     num_segments=20, use_SMOTE=False):
     
     
     start_time = datetime.now()
@@ -176,7 +177,9 @@ def run_experimenter(use_domain_split=False, train_domains=None, test_domain=Non
         "mode": "supervised",  # "pretrain", "supervised", or "both"
         "use_domain_split": use_domain_split,
         "train_domains": train_domains,
-        "test_domain": test_domain
+        "test_domain": test_domain,
+        "num_segments":num_segments,
+        "use_SMOTE": use_SMOTE 
     }
        
     metrics = experimenter_classifier_v2(
@@ -223,17 +226,18 @@ if __name__ == '__main__':
     print(f">> Start: {timestamp}")
     
     use_domain_split = True  # Toggle domain-based splitting
-    train_domains=["1", "2", "3", "4", "5", "6", "7", "8"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
-    test_domain="9"
+    train_domains=["1", "2", "3", "4", "9", "10", "11", "12"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
+    test_domain="8"
     preprocessing = "rms" # "zscore" (Standardization) "rms" (Root Mean Square) "none"
     model_type="DeiT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
     pretrain_model=False # pretrain or use saved 
     base_model=True # base model with no pre-train strategy neither use of weights saved
     perform_kfold=True
-    create_sp = True
-    download_raw = True
+    create_sp = False
+    download_raw = False
     dataset_name = "CWRU"
     num_segments = 20
+    use_SMOTE = False
     
     if download_raw:
         download(dataset_name)
@@ -241,7 +245,7 @@ if __name__ == '__main__':
         create_spectrograms(use_domain_split, train_domains, test_domain, preprocessing, dataset_name, num_segments) 
     
     run_experimenter(use_domain_split, train_domains, test_domain, preprocessing,
-                     model_type, pretrain_model, base_model, perform_kfold, dataset_name)
+                     model_type, pretrain_model, base_model, perform_kfold, dataset_name, num_segments, use_SMOTE)
     
     
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")

@@ -23,6 +23,8 @@ preprocessing_methods = ["none","zscore", "rms"]
 # preprocessing_methods = ["rms"]
 dataset_name = "CWRU"
 num_segments = 20
+use_SMOTE = False
+
 train_test_tuples = [
     # (["1", "2", "3", "4", "5", "6", "7", "8"], "9"),
     # (["1", "2", "3", "4", "5", "6", "7", "8"], "10"),
@@ -52,7 +54,8 @@ for train_domains, test_domain in train_test_tuples:
             run_experimenter(
                 use_domain_split=True, train_domains=train_domains, test_domain=test_domain,
                 preprocessing=preprocessing, model_type=model_type,
-                pretrain_model=False, base_model=True, perform_kfold=True, dataset_name=dataset_name
+                pretrain_model=False, base_model=True, perform_kfold=True, dataset_name=dataset_name,
+                num_segments = num_segments, use_SMOTE=use_SMOTE
             )
 # base_path = 'data/spectrograms/cwru'
 # print(os.listdir('data/spectrograms/cwru/test_domain_1'))

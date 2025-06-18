@@ -118,7 +118,9 @@ def experimenter_classifier_v2(
     mode="supervised",
     use_domain_split=False,
     train_domains=None,
-    test_domain=None
+    test_domain=None,
+    num_segments=20,
+    use_SMOTE=False
 ):
     print(f"Experiment Parameters: {locals()}")
 
