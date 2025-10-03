@@ -156,7 +156,7 @@ def create_spectrograms(use_domain_split=False, train_domains=None, test_domain=
 # EXPERIMENTERS
 def run_experimenter(use_domain_split=False, train_domains=None, test_domain=None, preprocessing="none",
                      model_type="CNN2D", pretrain_model=False, base_model=True, perform_kfold=True, dataset_name="CWRU", 
-                     num_segments=20, use_SMOTE=False):
+                     num_segments=20, use_SMOTE=False, batch_size=32):
     
     
     start_time = datetime.now()
@@ -170,7 +170,7 @@ def run_experimenter(use_domain_split=False, train_domains=None, test_domain=Non
         "lr": 0.00005,
         "num_epochs_kf": 30,
         "lr_kf": 0.00005,
-        "batch_size": 32,
+        "batch_size": batch_size,
         "root_dir": "data/spectrograms",
         "dataset_name": dataset_name,
         "perform_kfold": perform_kfold,
@@ -226,10 +226,10 @@ if __name__ == '__main__':
     print(f">> Start: {timestamp}")
     
     use_domain_split = True  # Toggle domain-based splitting
-    train_domains=["1", "2", "3", "4", "9", "10", "11", "12"]  # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
-    test_domain="8"
+    train_domains=["5", "6", "7", "8", "9", "10", "11", "12"] # Multiple domains for Train/Validation - from 1 to 10 based on Sehri et al.
+    test_domain="3"
     preprocessing = "rms" # "zscore" (Standardization) "rms" (Root Mean Square) "none"
-    model_type="DeiT"  # Options: "ViT", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
+    model_type="MAE"  # Options: "ViT", "MaxViT", "ViTVox", "DeiT", "DINOv2", "SwinV2", "MAE","CNN2D", "ResNet18"
     pretrain_model=False # pretrain or use saved 
     base_model=True # base model with no pre-train strategy neither use of weights saved
     perform_kfold=True
@@ -237,6 +237,7 @@ if __name__ == '__main__':
     download_raw = False
     dataset_name = "CWRU"
     num_segments = 20
+    batch_size = 32
     use_SMOTE = False
     
     if download_raw:
@@ -245,7 +246,7 @@ if __name__ == '__main__':
         create_spectrograms(use_domain_split, train_domains, test_domain, preprocessing, dataset_name, num_segments) 
     
     run_experimenter(use_domain_split, train_domains, test_domain, preprocessing,
-                     model_type, pretrain_model, base_model, perform_kfold, dataset_name, num_segments, use_SMOTE)
+                     model_type, pretrain_model, base_model, perform_kfold, dataset_name, num_segments, use_SMOTE, batch_size)
     
     
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")

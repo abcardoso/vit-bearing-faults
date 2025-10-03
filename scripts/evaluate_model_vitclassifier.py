@@ -14,7 +14,7 @@ from collections import Counter
 from torchvision.datasets import ImageFolder
 from mpl_toolkits.mplot3d import Axes3D
 from datetime import datetime
-from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier,MAEClassifier
+from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier,MAEClassifier, MaxViTClassifier, ViTVoxClassifier
 from src.data_processing import SpectrogramImageDataset
 from torch.optim import Adam, AdamW
 from torch.utils.data import DataLoader, Subset, ConcatDataset, WeightedRandomSampler
@@ -22,6 +22,8 @@ from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, r
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedShuffleSplit, StratifiedGroupKFold, StratifiedKFold
 from scripts.experiments.helper import grouperf, grouper_distribution 
+from imblearn.over_sampling import SMOTE
+from torch.utils.data import TensorDataset
 
 def print_confusion_matrix(confusion_matrix, class_names, output_dir, experiment_name, all_labels=None, all_predictions=None):
         # Ensure the logs folder exists
@@ -280,6 +282,41 @@ def load_datasets(root_dir, first_datasets_name, target_datasets_name, use_domai
                 raise FileNotFoundError(f"Error: Dataset folder {dataset_path} is missing or empty!")
 
     return train_datasets, val_datasets, test_dataset
+
+def apply_smote_to_imagefolder(dataloader, device="cpu"):
+    """
+    Applies SMOTE to a DataLoader or Dataset by flattening image tensors.
+    Returns a new TensorDataset with balanced samples.
+    """
+    images = []
+    labels = []
+
+    # Iterate through the DataLoader to collect all images and labels
+    for batch in dataloader:
+        # Handles both (inputs, labels) and ((inputs, ...), labels) batch styles
+        if isinstance(batch, (list, tuple)) and len(batch) == 2:
+            img, label = batch
+        else:
+            raise ValueError("Unexpected batch format in DataLoader")
+        img = img.to(device)
+        label = label.to(device)
+
+        # If batch size > 1, iterate in batch; else, just add
+        for i in range(img.shape[0]):
+            images.append(img[i].cpu().view(-1).numpy())
+            labels.append(label[i].cpu().item())
+
+    smote = SMOTE()
+    X_res, y_res = smote.fit_resample(np.array(images), np.array(labels))
+
+    # Reshape back to image tensors (assumes original size 3x224x224)
+    X_res_tensors = torch.tensor(X_res).float().view(-1, 3, 224, 224)
+    y_res_tensors = torch.tensor(y_res).long()
+
+    print(f"[INFO] Applied SMOTE: Original={len(images)}, After={len(X_res)}")
+    return TensorDataset(X_res_tensors, y_res_tensors)
+
+
     
 def kfold_validation(
     model,
@@ -291,7 +328,8 @@ def kfold_validation(
     class_names=[],
     n_splits=4,
     debug=False,
-    patience=5  
+    patience=5, 
+    use_SMOTE=False  
 ):
 
     print("Starting K-Fold Validation (with separate train+val set)...")
@@ -321,8 +359,15 @@ def kfold_validation(
         model.load_state_dict(copy.deepcopy(initial_state))
         optimizer = create_optimizer(model, lr)
 
+        if use_SMOTE:
+            balanced_train_dataset = apply_smote_to_imagefolder(train_loader)
+            balanced_train_loader = DataLoader(balanced_train_dataset, batch_size=32, shuffle=True)
+            train_loader_inuse = balanced_train_loader
+        else:  
+            train_loader_inuse = train_loader
+        
         train_acc_list, val_acc_list, best_train_acc, best_val_acc = train_model(
-            model, train_loader, val_loader, optimizer, num_epochs,
+            model, train_loader_inuse, val_loader, optimizer, num_epochs,
             patience=patience  # Early stopping enabled
         )
 
@@ -400,6 +445,10 @@ def create_optimizer(model, lr):
         params = model.deit.parameters()
     elif isinstance(model, ViTClassifier):
         params = model.vit.parameters()
+    elif isinstance(model, MaxViTClassifier):
+        params = model.maxvit.parameters()    
+    elif isinstance(model, ViTVoxClassifier):
+        params = model.vit.parameters()    
     elif isinstance(model, DINOv2WithRegistersClassifier):
         params = model.dinov2.parameters()
     elif isinstance(model, SwinV2Classifier):
@@ -521,7 +570,7 @@ def evaluate_model(model, test_loader, class_names, debug=False, sample_idx=None
         ))
         #print(classification_report(all_labels, all_predictions, target_names=class_names,zero_division=1))
 
-    if hasattr(model, 'vit') or hasattr(model, 'deit') or hasattr(model, 'dinov2') or hasattr(model, 'swinv2') or hasattr(model, 'mae'):
+    if hasattr(model, 'vit') or hasattr(model, 'deit') or hasattr(model, 'dinov2') or hasattr(model, 'swinv2') or hasattr(model, 'mae') or hasattr(model, 'vitvox'):
         if attention_print: 
             # Visualize attention for representative samples of each class
             class_sample_indices = pick_representative_indices_by_class(test_loader, num_classes=len(class_names))

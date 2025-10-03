@@ -1,6 +1,6 @@
 import os
 import sys
-import pandas as pd
+#import pandas as pd
 from datetime import datetime
 from utils.dual_output import DualOutput
 from contextlib import redirect_stdout
@@ -16,13 +16,14 @@ timestamp1 = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 print(f">> Start Experiment Batch: {timestamp1}")
 
 # Define parameter values
-model_types = ["ViT", "DeiT", "DINOv2", "SwinV2", "MAE", "CNN2D"]
+model_types = ["ViT","ViTVox", "DeiT", "DINOv2", "SwinV2", "MAE", "CNN2D"]
 # model_types = ["ViT","DINOv2"]
 preprocessing_methods = ["none","zscore", "rms"]
 #preprocessing_methods = ["zscore", "rms"]
 # preprocessing_methods = ["rms"]
 dataset_name = "CWRU"
 num_segments = 20
+batch_size = 32
 use_SMOTE = False
 
 train_test_tuples = [
@@ -55,7 +56,7 @@ for train_domains, test_domain in train_test_tuples:
                 use_domain_split=True, train_domains=train_domains, test_domain=test_domain,
                 preprocessing=preprocessing, model_type=model_type,
                 pretrain_model=False, base_model=True, perform_kfold=True, dataset_name=dataset_name,
-                num_segments = num_segments, use_SMOTE=use_SMOTE
+                num_segments = num_segments, use_SMOTE=use_SMOTE, batch_size=batch_size
             )
 # base_path = 'data/spectrograms/cwru'
 # print(os.listdir('data/spectrograms/cwru/test_domain_1'))

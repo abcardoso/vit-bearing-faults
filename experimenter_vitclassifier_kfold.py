@@ -3,43 +3,20 @@ import os
 import copy
 import sys
 import logging
+import torch.nn.functional as F
 from collections import Counter
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, ConcatDataset, Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
-from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier, MAEClassifier #, DeepSeekVL2Classifier 
+from src.models import CNN2D, ViTClassifier, ResNet18, DeiTClassifier, DINOv2WithRegistersClassifier, SwinV2Classifier, MAEClassifier, MaxViTClassifier, ViTVoxClassifier #, DeepSeekVL2Classifier 
 from src.models.vitclassifier import train_and_save, load_trained_model
 from scripts.evaluate_model_vitclassifier import kfold_validation, resubstitution_test, one_fold_with_bias, one_fold_without_bias, evaluate_full_model
 from datasets.uored import UORED
 from datasets.cwru import CWRU
-from imblearn.over_sampling import SMOTE
-from torch.utils.data import TensorDataset
 from utils.logginout import LoggerWriter
 from utils.print_info import print_info
 
-
-def apply_smote_to_imagefolder(imagefolder_dataset):
-    """
-    Applies SMOTE to an ImageFolder dataset by flattening image tensors.
-    Returns a new TensorDataset with balanced samples.
-    """
-    images = []
-    labels = []
-
-    for img, label in imagefolder_dataset:
-        images.append(img.view(-1).numpy())  # Flatten image
-        labels.append(label)
-
-    smote = SMOTE()
-    X_res, y_res = smote.fit_resample(np.array(images), np.array(labels))
-
-    # Reshape back to image tensors (assumes original size 3x224x224)
-    X_res_tensors = torch.tensor(X_res).float().view(-1, 3, 224, 224)
-    y_res_tensors = torch.tensor(y_res).long()
-
-    print(f"[INFO] Applied SMOTE: Original={len(images)}, After={len(X_res)}")
-    return TensorDataset(X_res_tensors, y_res_tensors)
 
 def compute_and_print_distribution(loader, class_to_idx, dataset_name):
     """
@@ -101,6 +78,39 @@ def enforce_consistent_mapping(datasets: list[ImageFolder], desired_class_to_idx
 
 
     print("[INFO] Mappings enforced successfully.")
+
+def pretrain_model_on_data(model, train_data, epochs=30, lr=1e-3, batch_size=32):
+
+    # If not a DataLoader, create one
+    if not isinstance(train_data, DataLoader):
+        loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=2)
+    else:
+        loader = train_data
+
+    device="cuda"
+    model = model.to(device)
+    model.train()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    for epoch in range(epochs):
+        running_loss = 0.0
+        for inputs, targets in loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            optimizer.zero_grad()
+
+            outputs = model(inputs)
+            if isinstance(outputs, tuple):
+                logits = outputs[0]
+            loss = F.cross_entropy(logits, targets)
+            
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item() * inputs.size(0)
+        avg_loss = running_loss / len(loader.dataset)
+        print(f"[Pretrain] Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+
+    model.eval()
+    return model
     
 def experimenter_classifier_v2(
     model_type="DeiT",
@@ -127,6 +137,8 @@ def experimenter_classifier_v2(
     # === Model setup ===
     model_classes = {
         "ViT": ViTClassifier,
+        "ViTVox": ViTVoxClassifier,
+        "MaxViT": MaxViTClassifier,
         "DeiT": DeiTClassifier,
         "DINOv2": DINOv2WithRegistersClassifier,
         "SwinV2": SwinV2Classifier,
@@ -184,10 +196,14 @@ def experimenter_classifier_v2(
 
     print(f"[DEBUG] Data split - Total Train+Val: {len(full_train_dataset)}, Test: {len(test_dataset)}")
 
-    if not base_model:
-        raise NotImplementedError("Pre-trained model strategy is not implemented in this version.")
+    # if not base_model:
+    #     raise NotImplementedError("Pre-trained model strategy is not implemented in this version.")
 
-    print(f"Using base model {model_type}Classifier with no pre-training.")
+    print(f"Using base model {model_type}Classifier.")
+    
+    if pretrain_model:
+        print("[INFO] Pretraining model on all train_domains data (no test domain).")
+        model = pretrain_model_on_data(model, train_val_loader)
 
     # === Run K-Fold with separate test ===
     metrics = kfold_validation(
@@ -200,7 +216,8 @@ def experimenter_classifier_v2(
         class_names=class_names,
         n_splits=4,
         debug=True,
-        patience=6
+        patience=6,
+        use_SMOTE=use_SMOTE
     )
 
     return metrics

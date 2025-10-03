@@ -49,6 +49,62 @@ class ViTClassifier(nn.Module):
         # Forward pass through the model
         output = self.vit(pixel_values=inputs)
         return output.logits, output.attentions  # Return logits and attention weights
+
+class ViTVoxClassifier(nn.Module):
+    def __init__(self, num_classes=4, dropout_rate=0.6):
+        super(ViTVoxClassifier, self).__init__()
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Initialize the processor for preprocessing images
+        self.processor = AutoImageProcessor.from_pretrained(
+            "MattyB95/VIT-VoxCelebSpoof-Mel_Spectrogram-Synthetic-Voice-Detection"
+        )
+
+        # Load the ViT model with the correct number of classes, replacing the classifier
+        self.vit = AutoModelForImageClassification.from_pretrained(
+            "MattyB95/VIT-VoxCelebSpoof-Mel_Spectrogram-Synthetic-Voice-Detection",
+            num_labels=num_classes,
+            ignore_mismatched_sizes=True,
+            output_attentions=True,
+        )
+
+        # Adjust the classifier to include dropout (if you want to enforce this)
+        self.vit.classifier = nn.Sequential(
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(self.vit.config.hidden_size, num_classes)
+        )
+
+    def forward(self, x):
+        # Convert tensors back to PIL images for compatibility with processor
+        to_pil = ToPILImage()
+        images = [to_pil(img) for img in x]
+
+        # Preprocess images
+        inputs = self.processor(images=images, return_tensors="pt").pixel_values.to(x.device)
+
+        # Forward pass through the model
+        output = self.vit(pixel_values=inputs)
+        return output.logits, output.attentions  # Logits and attention weights
+ 
+class MaxViTClassifier(nn.Module):
+    def __init__(self, num_classes=4):
+        super(MaxViTClassifier, self).__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        pretrained_model_name="timm/maxvit_rmlp_base_rw_224.sw_in12k"
+        self.processor = AutoImageProcessor.from_pretrained(pretrained_model_name)
+        self.maxvit = AutoModelForImageClassification.from_pretrained(
+            pretrained_model_name,
+            num_labels=num_classes,
+            ignore_mismatched_sizes=True,
+            # REMOVE output_attentions!
+        )    
+    def forward(self, x):
+        to_pil = ToPILImage()
+        images = [to_pil(img) for img in x]
+        inputs = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
+        outputs = self.maxvit(pixel_values=inputs)
+        return outputs.logits, None         
  
 class DeiTClassifier(nn.Module):
     def __init__(self, num_classes=4, dropout_rate=0.6):
