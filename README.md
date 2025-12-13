@@ -120,6 +120,7 @@ You can customize:
 ## Results and Logging
 
 - Metrics and artifacts are written under `logs/experiment_logs/`.  
+- Appendix A results https://github.com/abcardoso/vit-bearing-faults/blob/main/appendix_a.md
 - Recommended reporting:
   - Accuracy, precision, recall, F1
   - Confidence intervals across folds
