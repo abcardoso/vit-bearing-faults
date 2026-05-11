@@ -177,6 +177,10 @@ These signals can support fair trade-offs between accuracy, latency, and resourc
 
 ### Related publications
 
+Master's Dissertation: 
+Spectrogram-Based vision transformers for bearing fault diagnosis: cross-domain evaluation on UORED-VAFCLS and CWRU
+https://repositorio.ifes.edu.br/handle/123456789/8162
+
 See the most up-to-date list on Google Scholar:  
 https://scholar.google.com/citations?user=vpEq5QIAAAAJ
 
